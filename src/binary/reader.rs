@@ -12,11 +12,11 @@ const TAG_SHORT_STR: u8 = 0x04;
 const TAG_LONG_STR: u8 = 0x14;
 
 /// A reader adaptor for Rua binary chunk
-pub struct Reader<'a, T: ReadBytesExt> {
+pub struct Reader<'a, T: io::Read> {
     src: &'a mut T,
 }
 
-impl<'a, T: ReadBytesExt> Reader<'a, T> {
+impl<'a, T: io::Read> Reader<'a, T> {
     /// Constructs a `Reader` from `File`, `BufReader` and etc...
     pub fn new(src: &'a mut T) -> Self {
         Self { src }
