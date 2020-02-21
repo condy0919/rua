@@ -22,7 +22,7 @@ const RUA_NUMBER_SIZE: u8 = mem::size_of::<f64>() as u8;
 const RUA_INTEGER_DATA: i64 = 0x5678;
 const RUA_NUMBER_DATA: f64 = 370.5;
 
-/// The constants in Rua
+/// The constants in Lua
 #[derive(PartialEq, Debug)]
 pub enum Constant {
     Nil,
@@ -32,7 +32,7 @@ pub enum Constant {
     Str(String),
 }
 
-/// The local variable in Rua
+/// The local variable in Lua
 #[derive(Eq, PartialEq, Debug, Hash)]
 pub struct LocalVariable {
     pub name: String,
