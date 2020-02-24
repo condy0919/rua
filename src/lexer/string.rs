@@ -198,12 +198,14 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
 
                     // UTF-8 escape sequence, e.g. \u{XXX}
+                    // The length of escape sequence must be greater than ZERO.
                     b'u' => {
                         if self.peek(1)? != Some(b'{') {
                             return Err(LexerError::EscapeUnicodeStart);
                         }
                         self.advance(2);
 
+                        let mut seq_len: usize = 0;
                         let mut u: u32 = 0;
                         loop {
                             if let Some(c) = self.peek(0)? {
@@ -212,6 +214,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                                     break;
                                 } else if let Some(h) = ascii_to_hexdigit(c) {
                                     u = (u << 4) | h as u32;
+                                    seq_len += 1;
                                     self.advance(1);
                                 } else {
                                     return Err(LexerError::EscapeUnicodeEnd);
@@ -219,6 +222,10 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                             } else {
                                 return Err(LexerError::EscapeUnicodeEnd);
                             }
+                        }
+
+                        if seq_len == 0 {
+                            return Err(LexerError::EscapeUnicodeInvalid);
                         }
 
                         let c = char::from_u32(u).ok_or(LexerError::EscapeUnicodeInvalid)?;
@@ -460,6 +467,10 @@ mod tests {
         assert_eq!(lex.next().unwrap_err(), LexerError::EscapeUnicodeEnd);
 
         let mut s: &[u8] = b"'unicode \\u{110000}";
+        let mut lex = Lexer::new(&mut s);
+        assert_eq!(lex.next().unwrap_err(), LexerError::EscapeUnicodeInvalid);
+
+        let mut s: &[u8] = b"'unicode \\u{}'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(lex.next().unwrap_err(), LexerError::EscapeUnicodeInvalid);
 
