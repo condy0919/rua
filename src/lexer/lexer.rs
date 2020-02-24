@@ -160,7 +160,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
         }
     }
 
-    /// Current line number of the source file
+    /// Current line number of the source file, 1-indexed
     pub fn get_line(&self) -> usize {
         self.line
     }
@@ -327,12 +327,18 @@ impl<'a, S: io::Read> Lexer<'a, S> {
     pub(crate) fn skip_whitespace(&mut self) -> Result<(), LexerError> {
         while let Some(c) = self.peek(0)? {
             match c {
-                b' ' | b'\t' | b'\x0b' | b'\x0c' => {
-                    self.advance(1);
+                ws if ws.is_ascii_whitespace() => {
+                    if ws == b'\r' || ws == b'\n' {
+                        self.add_new_line()?;
+                    } else {
+                        self.advance(1);
+                    }
                 }
 
-                b'\r' | b'\n' => {
-                    self.add_new_line()?;
+                b'#' if self.get_line() == 1 => {
+                    // shebang, skip until end of line.
+                    self.advance(1);
+                    self.skip_until_eol()?;
                 }
 
                 b'-' => {
@@ -340,22 +346,15 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                         break;
                     }
 
-                    // comments
                     self.advance(2);
                     match (self.peek(0)?, self.peek(1)?) {
                         (Some(b'['), Some(b'=')) | (Some(b'['), Some(b'[')) => {
-                            // TODO read long string
+                            // long comment, read and ignore the result
+                            self.read_long_string()?;
                         }
                         _ => {
                             // short comment, skip until end of line
-                            while let Some(c) = self.peek(0)? {
-                                if c == b'\r' || c == b'\n' {
-                                    break;
-                                }
-                                self.advance(1);
-                            }
-
-                            self.add_new_line()?;
+                            self.skip_until_eol()?;
                         }
                     }
                 }
@@ -363,6 +362,17 @@ impl<'a, S: io::Read> Lexer<'a, S> {
             }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn skip_until_eol(&mut self) -> Result<(), LexerError> {
+        while let Some(c) = self.peek(0)? {
+            if c == b'\r' || c == b'\n' {
+                self.add_new_line()?;
+                break;
+            }
+            self.advance(1);
+        }
         Ok(())
     }
 
@@ -390,5 +400,44 @@ impl<'a, S: io::Read> Lexer<'a, S> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whitespace_short_comment() {
+        let mut s: &[u8] = b"   -- text in comments\n'string'";
+        let mut lex = Lexer::new(&mut s);
+        assert_eq!(
+            lex.next().unwrap().unwrap(),
+            Token::String("string".to_owned())
+        );
+        assert_eq!(lex.get_line(), 2);
+    }
+
+    #[test]
+    fn whitespace_long_comment() {
+        let mut s: &[u8] =
+            b"--[[ text in long comments\nstill in comments\n]]\n'string after long comments'";
+        let mut lex = Lexer::new(&mut s);
+        assert_eq!(
+            lex.next().unwrap().unwrap(),
+            Token::String("string after long comments".to_owned())
+        );
+        assert_eq!(lex.get_line(), 4);
+    }
+
+    #[test]
+    fn whitespace_shebang() {
+        let mut s: &[u8] = b"#!/bin/lua arguments will be ignored\n 'string'";
+        let mut lex = Lexer::new(&mut s);
+        assert_eq!(
+            lex.next().unwrap().unwrap(),
+            Token::String("string".to_owned())
+        );
+        assert_eq!(lex.get_line(), 2);
     }
 }

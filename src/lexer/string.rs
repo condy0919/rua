@@ -353,6 +353,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("\nhere".to_owned())
         );
+        assert_eq!(lex.get_line(), 2);
         assert_eq!(lex.next().unwrap(), None);
 
         // \n\n
@@ -362,6 +363,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("\n\ntwo lines".to_owned())
         );
+        assert_eq!(lex.get_line(), 3);
 
         // \r\r
         let mut s: &[u8] = b"[==[\r\rtwo lines]==]";
@@ -370,6 +372,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("\n\ntwo lines".to_owned())
         );
+        assert_eq!(lex.get_line(), 3);
 
         // \n\r
         let mut s: &[u8] = b"[==[\n\rone line]==]";
@@ -378,6 +381,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("\none line".to_owned())
         );
+        assert_eq!(lex.get_line(), 2);
     }
 
     #[test]
@@ -529,6 +533,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("escape \x07 \x08 \x0c \n \r \t \x0b \\ \' \"".to_owned())
         );
+        assert_eq!(lex.get_line(), 1);
     }
 
     #[test]
@@ -539,6 +544,7 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("slash z line1".to_owned())
         );
+        assert_eq!(lex.get_line(), 5);
     }
 
     #[test]
@@ -549,5 +555,6 @@ mod tests {
             lex.next().unwrap().unwrap(),
             Token::String("slash \nfirst \nsecond".to_owned())
         );
+        assert_eq!(lex.get_line(), 3);
     }
 }
