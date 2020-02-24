@@ -96,9 +96,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
     /// its numeric value (including embedded zeros). This can be done with the
     /// escape sequence \xXX, where XX is a sequence of exactly two hexadecimal
     /// digits, or with the escape sequence \ddd, where ddd is a sequence of up
-    /// to three decimal digits. (Note that if a decimal escape sequence is to
-    /// be followed by a digit, it must be expressed using exactly three
-    /// digits.)
+    /// to three decimal digits.
     ///
     /// The UTF-8 encoding of a Unicode character can be inserted in a literal
     /// string with the escape sequence \u{XXX} (note the mandatory enclosing
@@ -248,19 +246,25 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
 
                     // the escape sequence \ddd, where ddd is a sequence of up
-                    // to three decimal digits. (Note that if a decimal escape
-                    // sequence is to be followed by a digit, it must be
-                    // expressed using exactly three digits.)
+                    // to three decimal digits.
                     c if c.is_ascii_digit() => {
                         let mut u: u16 = 0;
-                        for i in 0..3 {
-                            if let Some(d) = self.peek(i)?.and_then(ascii_to_digit) {
-                                u = 10 * u + d as u16;
-                            } else {
-                                return Err(LexerError::EscapeDecimalInvalid);
-                            }
+                        if let Some(d) = self.peek(0)?.and_then(ascii_to_digit) {
+                            u = 10 * u + d as u16;
+                            self.advance(1);
+                        } else {
+                            return Err(LexerError::EscapeDecimalInvalid);
                         }
-                        self.advance(3);
+
+                        if let Some(d) = self.peek(0)?.and_then(ascii_to_digit) {
+                            u = 10 * u + d as u16;
+                            self.advance(1);
+                        }
+
+                        if let Some(d) = self.peek(0)?.and_then(ascii_to_digit) {
+                            u = 10 * u + d as u16;
+                            self.advance(1);
+                        }
 
                         if u > 255 {
                             return Err(LexerError::EscapeDecimalTooLarge);
@@ -493,11 +497,17 @@ mod tests {
     fn short_string_escape_decimal() {
         let mut s: &[u8] = b"'decimal \\12'";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(lex.next().unwrap_err(), LexerError::EscapeDecimalInvalid);
+        assert_eq!(
+            lex.next().unwrap().unwrap(),
+            Token::String("decimal \x0c".to_owned())
+        );
 
         let mut s: &[u8] = b"'decimal \\9f0'";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(lex.next().unwrap_err(), LexerError::EscapeDecimalInvalid);
+        assert_eq!(
+            lex.next().unwrap().unwrap(),
+            Token::String("decimal \tf0".to_owned())
+        );
 
         let mut s: &[u8] = b"'decimal \\256'";
         let mut lex = Lexer::new(&mut s);
