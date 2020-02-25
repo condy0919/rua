@@ -11,12 +11,12 @@ const TAG_INTEGER: u8 = 0x13;
 const TAG_SHORT_STR: u8 = 0x04;
 const TAG_LONG_STR: u8 = 0x14;
 
-/// A reader adaptor for Rua binary chunk
-pub struct Reader<'a, T: ReadBytesExt> {
+/// A reader adaptor for Lua binary chunk
+pub struct Reader<'a, T: io::Read> {
     src: &'a mut T,
 }
 
-impl<'a, T: ReadBytesExt> Reader<'a, T> {
+impl<'a, T: io::Read> Reader<'a, T> {
     /// Constructs a `Reader` from `File`, `BufReader` and etc...
     pub fn new(src: &'a mut T) -> Self {
         Self { src }
@@ -73,7 +73,7 @@ impl<'a, T: ReadBytesExt> Reader<'a, T> {
         Ok(vec)
     }
 
-    /// Returns a [`Constant`] in Rua or yields an `io::Result::Err`.
+    /// Returns a [`Constant`] in Lua or yields an `io::Result::Err`.
     ///
     /// It can be:
     ///
@@ -99,7 +99,7 @@ impl<'a, T: ReadBytesExt> Reader<'a, T> {
         Ok(c)
     }
 
-    /// Returns an [`UpValue`] in Rua or yields an `io::Result::Err`
+    /// Returns an [`UpValue`] in Lua or yields an `io::Result::Err`
     ///
     /// [`UpValue`]: ../struct.UpValue.html
     pub fn read_upvalue(&mut self) -> io::Result<UpValue> {
@@ -109,7 +109,7 @@ impl<'a, T: ReadBytesExt> Reader<'a, T> {
         })
     }
 
-    /// Returns a [`LocalVariable`] in Rua or yields an `io::Result::Err`
+    /// Returns a [`LocalVariable`] in Lua or yields an `io::Result::Err`
     ///
     /// [`LocalVariable`]: ../struct.LocalVariable.html
     pub fn read_local_variable(&mut self) -> io::Result<LocalVariable> {
@@ -120,7 +120,7 @@ impl<'a, T: ReadBytesExt> Reader<'a, T> {
         })
     }
 
-    /// Returns a [`Prototype`] in Rua or yields an `io::Result::Err`
+    /// Returns a [`Prototype`] in Lua or yields an `io::Result::Err`
     ///
     /// [`Prototype`]: ../struct.Prototype.html
     pub fn read_prototype(&mut self) -> io::Result<Prototype> {
