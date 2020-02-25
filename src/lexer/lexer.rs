@@ -72,7 +72,7 @@ pub enum Token {
     ShiftLeft,
     LessThan,
     LessEqual,
-    Greater,
+    GreaterThan,
     GreaterEqual,
     Equal,
     NotEqual,
@@ -180,14 +180,14 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                         b'(' => Token::LeftParen,
                         b')' => Token::RightParen,
                         b'{' => Token::LeftBrace,
-                        b'}' => Token::RightParen,
+                        b'}' => Token::RightBrace,
                         b']' => Token::RightBracket,
                         b'+' => Token::Add,
                         b'-' => Token::Minus,
                         b'*' => Token::Mul,
                         b'%' => Token::Mod,
                         b'^' => Token::Power,
-                        b'#' => Token::Concat,
+                        b'#' => Token::Len,
                         b'&' => Token::BitAnd,
                         b'|' => Token::BitOr,
                         b';' => Token::SemiColon,
@@ -243,12 +243,13 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 b'<' => {
                     self.advance(1);
                     match self.peek(0)? {
-                        Some(c) if c == b'=' || c == b'<' => {
+                        Some(b'=') => {
                             self.advance(1);
-                            match c {
-                                b'=' => Token::LessEqual,
-                                _ => Token::ShiftRight,
-                            }
+                            Token::LessEqual
+                        }
+                        Some(b'<') => {
+                            self.advance(1);
+                            Token::ShiftLeft
                         }
                         _ => Token::LessThan,
                     }
@@ -257,14 +258,15 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 b'>' => {
                     self.advance(1);
                     match self.peek(0)? {
-                        Some(c) if c == b'=' || c == b'>' => {
+                        Some(b'=') => {
                             self.advance(1);
-                            match c {
-                                b'=' => Token::GreaterEqual,
-                                _ => Token::ShiftRight,
-                            }
+                            Token::GreaterEqual
                         }
-                        _ => Token::GreaterEqual,
+                        Some(b'>') => {
+                            self.advance(1);
+                            Token::ShiftRight
+                        }
+                        _ => Token::GreaterThan,
                     }
                 }
 
@@ -367,7 +369,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
                 }
 
-                b'#' if self.get_line() == 1 => {
+                b'#' if self.get_line() == 1 && self.peek(1)? == Some(b'!') => {
                     // shebang, skip until end of line.
                     self.advance(1);
                     self.skip_until_eol()?;
@@ -513,5 +515,44 @@ mod tests {
         );
         assert_eq!(lex.next().unwrap(), Token::Identifier("except".to_owned()));
         assert_eq!(lex.next().unwrap(), Token::Function);
+    }
+
+    #[test]
+    fn operators() {
+        let mut s: &[u8] = b"(){}[]+-*/%^ # & | ;,//~ ~= = == > >> >= < << <= : :: . .. ...";
+        let mut lex = Lexer::new(&mut s);
+        assert_eq!(lex.next().unwrap(), Token::LeftParen);
+        assert_eq!(lex.next().unwrap(), Token::RightParen);
+        assert_eq!(lex.next().unwrap(), Token::LeftBrace);
+        assert_eq!(lex.next().unwrap(), Token::RightBrace);
+        assert_eq!(lex.next().unwrap(), Token::LeftBracket);
+        assert_eq!(lex.next().unwrap(), Token::RightBracket);
+        assert_eq!(lex.next().unwrap(), Token::Add);
+        assert_eq!(lex.next().unwrap(), Token::Minus);
+        assert_eq!(lex.next().unwrap(), Token::Mul);
+        assert_eq!(lex.next().unwrap(), Token::Div);
+        assert_eq!(lex.next().unwrap(), Token::Mod);
+        assert_eq!(lex.next().unwrap(), Token::Power);
+        assert_eq!(lex.next().unwrap(), Token::Len);
+        assert_eq!(lex.next().unwrap(), Token::BitAnd);
+        assert_eq!(lex.next().unwrap(), Token::BitOr);
+        assert_eq!(lex.next().unwrap(), Token::SemiColon);
+        assert_eq!(lex.next().unwrap(), Token::Comma);
+        assert_eq!(lex.next().unwrap(), Token::IDiv);
+        assert_eq!(lex.next().unwrap(), Token::BitXorNot);
+        assert_eq!(lex.next().unwrap(), Token::NotEqual);
+        assert_eq!(lex.next().unwrap(), Token::Assign);
+        assert_eq!(lex.next().unwrap(), Token::Equal);
+        assert_eq!(lex.next().unwrap(), Token::GreaterThan);
+        assert_eq!(lex.next().unwrap(), Token::ShiftRight);
+        assert_eq!(lex.next().unwrap(), Token::GreaterEqual);
+        assert_eq!(lex.next().unwrap(), Token::LessThan);
+        assert_eq!(lex.next().unwrap(), Token::ShiftLeft);
+        assert_eq!(lex.next().unwrap(), Token::LessEqual);
+        assert_eq!(lex.next().unwrap(), Token::Colon);
+        assert_eq!(lex.next().unwrap(), Token::DoubleColon);
+        assert_eq!(lex.next().unwrap(), Token::Dot);
+        assert_eq!(lex.next().unwrap(), Token::Concat);
+        assert_eq!(lex.next().unwrap(), Token::Dots);
     }
 }

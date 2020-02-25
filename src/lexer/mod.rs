@@ -6,6 +6,9 @@ pub use lexer::*;
 pub mod string;
 pub use string::*;
 
+pub mod number;
+pub use number::*;
+
 pub(crate) fn from_u8(c: u8) -> char {
     char::from_u32(c as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
 }
