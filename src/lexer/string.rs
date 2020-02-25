@@ -1,6 +1,7 @@
 use std::char;
 use std::io;
 
+use super::{ascii_to_digit, ascii_to_hexdigit};
 use super::{from_u16, from_u8};
 use super::{Lexer, LexerError, Token};
 
@@ -11,7 +12,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
     /// and ends at the first closing long bracket of the same level. Literals
     /// in this bracketed form can run for several lines, do not interpret any
     /// escape sequences, and ignore long brackets of any other level.
-    pub(crate) fn read_long_string(&mut self) -> Result<Option<Token>, LexerError> {
+    pub(crate) fn read_long_string(&mut self) -> Result<Token, LexerError> {
         assert_eq!(self.peek(0).unwrap().unwrap(), b'[');
         self.advance(1);
 
@@ -66,7 +67,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
             }
         }
 
-        Ok(Some(Token::String(string_buf)))
+        Ok(Token::String(string_buf))
     }
 
     /// Reads a string on a single line delimited by ' or " that allows for \
@@ -102,7 +103,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
     /// string with the escape sequence \u{XXX} (note the mandatory enclosing
     /// brackets), where XXX is a sequence of one or more hexadecimal digits
     /// representing the character code point.
-    pub(crate) fn read_short_string(&mut self) -> Result<Option<Token>, LexerError> {
+    pub(crate) fn read_short_string(&mut self) -> Result<Token, LexerError> {
         let start_quote = self.peek(0).unwrap().unwrap();
         assert!(start_quote == b'\'' || start_quote == b'\"');
         self.advance(1);
@@ -281,45 +282,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
             }
         }
 
-        Ok(Some(Token::String(string_buf)))
-    }
-}
-
-fn ascii_to_hexdigit(c: u8) -> Option<u8> {
-    match c {
-        b'0' => Some(0),
-        b'1' => Some(1),
-        b'2' => Some(2),
-        b'3' => Some(3),
-        b'4' => Some(4),
-        b'5' => Some(5),
-        b'6' => Some(6),
-        b'7' => Some(7),
-        b'8' => Some(8),
-        b'9' => Some(9),
-        b'a' | b'A' => Some(10),
-        b'b' | b'B' => Some(11),
-        b'c' | b'C' => Some(12),
-        b'd' | b'D' => Some(13),
-        b'e' | b'E' => Some(14),
-        b'f' | b'F' => Some(15),
-        _ => None,
-    }
-}
-
-fn ascii_to_digit(c: u8) -> Option<u8> {
-    match c {
-        b'0' => Some(0),
-        b'1' => Some(1),
-        b'2' => Some(2),
-        b'3' => Some(3),
-        b'4' => Some(4),
-        b'5' => Some(5),
-        b'6' => Some(6),
-        b'7' => Some(7),
-        b'8' => Some(8),
-        b'9' => Some(9),
-        _ => None,
+        Ok(Token::String(string_buf))
     }
 }
 
@@ -349,18 +312,15 @@ mod tests {
         // \r\n
         let mut s: &[u8] = b"[==[\r\nhere]==]";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::String("\nhere".to_owned())
-        );
+        assert_eq!(lex.next().unwrap(), Token::String("\nhere".to_owned()));
         assert_eq!(lex.get_line(), 2);
-        assert_eq!(lex.next().unwrap(), None);
+        assert_eq!(lex.next().unwrap(), Token::None);
 
         // \n\n
         let mut s: &[u8] = b"[==[\n\ntwo lines]==]";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("\n\ntwo lines".to_owned())
         );
         assert_eq!(lex.get_line(), 3);
@@ -369,7 +329,7 @@ mod tests {
         let mut s: &[u8] = b"[==[\r\rtwo lines]==]";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("\n\ntwo lines".to_owned())
         );
         assert_eq!(lex.get_line(), 3);
@@ -377,10 +337,7 @@ mod tests {
         // \n\r
         let mut s: &[u8] = b"[==[\n\rone line]==]";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::String("\none line".to_owned())
-        );
+        assert_eq!(lex.next().unwrap(), Token::String("\none line".to_owned()));
         assert_eq!(lex.get_line(), 2);
     }
 
@@ -389,7 +346,7 @@ mod tests {
         let mut s: &[u8] = b"[===[first line\n]==]]]]\rsecond line\n]===]";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("first line\n]==]]]]\nsecond line\n".to_owned())
         );
     }
@@ -399,7 +356,7 @@ mod tests {
         let mut s: &[u8] = b"'single quote'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("single quote".to_owned())
         );
     }
@@ -409,7 +366,7 @@ mod tests {
         let mut s: &[u8] = b"\"double quotes\"";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("double quotes".to_owned())
         );
     }
@@ -451,7 +408,7 @@ mod tests {
         let mut s: &[u8] = b"'2 hexdigits \\x1f'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("2 hexdigits \x1f".to_owned())
         );
 
@@ -485,14 +442,14 @@ mod tests {
         let mut s: &[u8] = b"'unicode \\u{00c}'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("unicode \x0c".to_owned())
         );
 
         let mut s: &[u8] = b"'unicode \\u{00c} unicode'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("unicode \x0c unicode".to_owned())
         );
     }
@@ -502,14 +459,14 @@ mod tests {
         let mut s: &[u8] = b"'decimal \\12'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("decimal \x0c".to_owned())
         );
 
         let mut s: &[u8] = b"'decimal \\9f0'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("decimal \tf0".to_owned())
         );
 
@@ -519,10 +476,7 @@ mod tests {
 
         let mut s: &[u8] = b"'decimal \\097'";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::String("decimal a".to_owned())
-        );
+        assert_eq!(lex.next().unwrap(), Token::String("decimal a".to_owned()));
     }
 
     #[test]
@@ -530,7 +484,7 @@ mod tests {
         let mut s: &[u8] = b"'escape \\a \\b \\f \\n \\r \\t \\v \\\\ \\\' \\\"'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("escape \x07 \x08 \x0c \n \r \t \x0b \\ \' \"".to_owned())
         );
         assert_eq!(lex.get_line(), 1);
@@ -541,7 +495,7 @@ mod tests {
         let mut s: &[u8] = b"'slash z \\z\n     line1\\z\n\\z\n\n'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("slash z line1".to_owned())
         );
         assert_eq!(lex.get_line(), 5);
@@ -552,7 +506,7 @@ mod tests {
         let mut s: &[u8] = b"'slash \\\nfirst \\\nsecond'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("slash \nfirst \nsecond".to_owned())
         );
         assert_eq!(lex.get_line(), 3);

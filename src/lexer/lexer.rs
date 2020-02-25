@@ -7,6 +7,7 @@ use phf::phf_map;
 
 use super::from_u8;
 
+/// Lua keywords are reserved and cannot be used as an idenfitier.
 const LUA_KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "and" => Token::And,
     "break" => Token::Break,
@@ -94,6 +95,7 @@ pub enum Token {
     String(String),
     Integer(i64),
     Number(f64),
+    None,
 }
 
 #[derive(Debug, PartialEq)]
@@ -165,12 +167,12 @@ impl<'a, S: io::Read> Lexer<'a, S> {
         self.line
     }
 
-    /// Gets the next `Token`, or `None` if the end of file reached
-    pub fn next(&mut self) -> Result<Option<Token>, LexerError> {
+    /// Gets the next `Token`, or `Token::None` if the end of file reached
+    pub fn next(&mut self) -> Result<Token, LexerError> {
         self.skip_whitespace()?;
 
-        if let Some(c) = self.peek(0)? {
-            Ok(Some(match c {
+        Ok(if let Some(c) = self.peek(0)? {
+            match c {
                 b'(' | b')' | b'{' | b'}' | b']' | b'+' | b'-' | b'*' | b'%' | b'^' | b'#'
                 | b'&' | b'|' | b';' | b',' => {
                     self.advance(1);
@@ -215,14 +217,18 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 }
 
                 b'[' => match self.peek(1)? {
-                    Some(b'=') | Some(b'[') => return self.read_long_string(),
+                    Some(b'=') | Some(b'[') => {
+                        return self.read_long_string();
+                    }
                     _ => {
                         self.advance(1);
                         Token::LeftBracket
                     }
                 },
 
-                b'\"' | b'\'' => return self.read_short_string(),
+                b'\"' | b'\'' => {
+                    return self.read_short_string();
+                }
 
                 b'=' => {
                     self.advance(1);
@@ -299,6 +305,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 }
 
                 c if c.is_ascii_alphabetic() || c == b'_' => {
+                    // TODO optimize frequent call of `from_u8`.
                     let mut string_buf = String::new();
                     string_buf.push(from_u8(c));
                     self.advance(1);
@@ -320,13 +327,13 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 }
 
                 c => return Err(LexerError::UnexpectedCharacter(c)),
-            }))
+            }
         } else {
-            Ok(None)
-        }
+            Token::None
+        })
     }
 
-    /// Peek n-bytes ahead
+    /// Peeks n-bytes ahead
     pub(crate) fn peek(&mut self, n: usize) -> Result<Option<u8>, LexerError> {
         while self.peek_buf.len() <= n {
             let mut c = [0];
@@ -441,10 +448,7 @@ mod tests {
     fn whitespace_short_comment() {
         let mut s: &[u8] = b"   -- text in comments\n'string'";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::String("string".to_owned())
-        );
+        assert_eq!(lex.next().unwrap(), Token::String("string".to_owned()));
         assert_eq!(lex.get_line(), 2);
     }
 
@@ -454,7 +458,7 @@ mod tests {
             b"--[[ text in long comments\nstill in comments\n]]\n'string after long comments'";
         let mut lex = Lexer::new(&mut s);
         assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::String("string after long comments".to_owned())
         );
         assert_eq!(lex.get_line(), 4);
@@ -464,10 +468,7 @@ mod tests {
     fn whitespace_shebang() {
         let mut s: &[u8] = b"#!/bin/lua arguments will be ignored\n 'string'";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::String("string".to_owned())
-        );
+        assert_eq!(lex.next().unwrap(), Token::String("string".to_owned()));
         assert_eq!(lex.get_line(), 2);
     }
 
@@ -476,47 +477,41 @@ mod tests {
         let mut s: &[u8] = b"and break do else elseif end false for function goto \
                              if in local nil not or repeat return then true until while";
         let mut lex = Lexer::new(&mut s);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::And);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Break);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Do);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Else);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::ElseIf);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::End);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::False);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::For);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Function);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Goto);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::If);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::In);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Local);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Nil);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Not);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Or);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Repeat);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Return);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Then);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::True);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Until);
-        assert_eq!(lex.next().unwrap().unwrap(), Token::While);
-        assert_eq!(lex.next().unwrap(), None);
+        assert_eq!(lex.next().unwrap(), Token::And);
+        assert_eq!(lex.next().unwrap(), Token::Break);
+        assert_eq!(lex.next().unwrap(), Token::Do);
+        assert_eq!(lex.next().unwrap(), Token::Else);
+        assert_eq!(lex.next().unwrap(), Token::ElseIf);
+        assert_eq!(lex.next().unwrap(), Token::End);
+        assert_eq!(lex.next().unwrap(), Token::False);
+        assert_eq!(lex.next().unwrap(), Token::For);
+        assert_eq!(lex.next().unwrap(), Token::Function);
+        assert_eq!(lex.next().unwrap(), Token::Goto);
+        assert_eq!(lex.next().unwrap(), Token::If);
+        assert_eq!(lex.next().unwrap(), Token::In);
+        assert_eq!(lex.next().unwrap(), Token::Local);
+        assert_eq!(lex.next().unwrap(), Token::Nil);
+        assert_eq!(lex.next().unwrap(), Token::Not);
+        assert_eq!(lex.next().unwrap(), Token::Or);
+        assert_eq!(lex.next().unwrap(), Token::Repeat);
+        assert_eq!(lex.next().unwrap(), Token::Return);
+        assert_eq!(lex.next().unwrap(), Token::Then);
+        assert_eq!(lex.next().unwrap(), Token::True);
+        assert_eq!(lex.next().unwrap(), Token::Until);
+        assert_eq!(lex.next().unwrap(), Token::While);
+        assert_eq!(lex.next().unwrap(), Token::None);
     }
 
     #[test]
     fn identifiers() {
         let mut s: &[u8] = b"usual identifiers except function";
         let mut lex = Lexer::new(&mut s);
+        assert_eq!(lex.next().unwrap(), Token::Identifier("usual".to_owned()));
         assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::Identifier("usual".to_owned())
-        );
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
+            lex.next().unwrap(),
             Token::Identifier("identifiers".to_owned())
         );
-        assert_eq!(
-            lex.next().unwrap().unwrap(),
-            Token::Identifier("except".to_owned())
-        );
-        assert_eq!(lex.next().unwrap().unwrap(), Token::Function);
+        assert_eq!(lex.next().unwrap(), Token::Identifier("except".to_owned()));
+        assert_eq!(lex.next().unwrap(), Token::Function);
     }
 }
