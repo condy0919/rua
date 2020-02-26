@@ -1,23 +1,23 @@
 use std::char;
 
 pub mod lexer;
-pub use lexer::*;
+pub use self::lexer::*;
 
 pub mod string;
-pub use string::*;
+pub use self::string::*;
 
 pub mod number;
-pub use number::*;
+pub use self::number::*;
 
-pub(crate) fn from_u8(c: u8) -> char {
+pub(in crate::lexer) fn from_u8(c: u8) -> char {
     char::from_u32(c as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
 }
 
-pub(crate) fn from_u16(c: u16) -> char {
+pub(in crate::lexer) fn from_u16(c: u16) -> char {
     char::from_u32(c as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
 }
 
-pub(crate) fn ascii_to_hexdigit(c: u8) -> Option<u8> {
+pub(in crate::lexer) fn ascii_to_hexdigit(c: u8) -> Option<u8> {
     match c {
         b'0' => Some(0),
         b'1' => Some(1),
@@ -39,7 +39,7 @@ pub(crate) fn ascii_to_hexdigit(c: u8) -> Option<u8> {
     }
 }
 
-pub(crate) fn ascii_to_digit(c: u8) -> Option<u8> {
+pub(in crate::lexer) fn ascii_to_digit(c: u8) -> Option<u8> {
     match c {
         b'0' => Some(0),
         b'1' => Some(1),
