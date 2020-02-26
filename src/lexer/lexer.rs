@@ -7,7 +7,7 @@ use phf::phf_map;
 
 use super::from_u8;
 
-/// Lua keywords are reserved and cannot be used as an idenfitier.
+/// Lua keywords are reserved and cannot be used as an identifier.
 const LUA_KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "and" => Token::And,
     "break" => Token::Break,
@@ -307,24 +307,24 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 }
 
                 c if c.is_ascii_alphabetic() || c == b'_' => {
-                    // TODO optimize frequent call of `from_u8`.
-                    let mut string_buf = String::new();
-                    string_buf.push(from_u8(c));
+                    let mut string_buf = Vec::new();
+                    string_buf.push(c);
                     self.advance(1);
 
                     while let Some(c) = self.peek(0)? {
                         if c.is_ascii_alphanumeric() || c == b'_' {
-                            string_buf.push(from_u8(c));
+                            string_buf.push(c);
                             self.advance(1);
                         } else {
                             break;
                         }
                     }
 
-                    if let Some(keyword) = LUA_KEYWORDS.get(string_buf.as_str()) {
+                    let s = unsafe { String::from_utf8_unchecked(string_buf) };
+                    if let Some(keyword) = LUA_KEYWORDS.get(s.as_str()) {
                         keyword.clone()
                     } else {
-                        Token::Identifier(string_buf)
+                        Token::Identifier(s)
                     }
                 }
 
