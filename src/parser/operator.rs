@@ -1,5 +1,8 @@
 use crate::lexer::Token;
 
+/// The precedence lower than any other operators
+pub const MIN_OPERATOR_PRECEDENCE: u8 = 0;
+
 /// Binary operator
 ///
 /// The precedence table:

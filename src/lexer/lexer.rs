@@ -361,7 +361,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
         })
     }
 
-    /// Peeks n-bytes ahead
+    /// Peeks (n+1)-bytes ahead, and returns the n-th byte if possible
     pub(crate) fn peek(&mut self, n: usize) -> Result<Option<u8>, LexerError> {
         while self.peek_buf.len() <= n {
             let mut c = [0];
