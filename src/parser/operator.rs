@@ -22,6 +22,10 @@ pub const MIN_OPERATOR_PRECEDENCE: u8 = 0;
 /// | and             | 2          | left          |
 /// | or              | 1          | left          |
 /// ```
+///
+/// # Reference
+///
+/// https://www.lua.org/manual/5.3/manual.html#3.4.8
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum BinaryOperator {
     Add,

@@ -20,7 +20,7 @@ use crate::lexer::Token;
 /// Explicit blocks are useful to control the scope of variable declarations.
 /// Explicit blocks are also sometimes used to add a return statement in the
 /// middle of another block.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Statement>,
     pub retstmt: Option<ReturnStatement>,
@@ -46,7 +46,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
         loop {
             match self.peek(0)? {
                 Some(&Token::SemiColon) => {
-                    self.advance(0);
+                    self.advance(1);
                 }
                 Some(&Token::Return) => {
                     retstmt = Some(self.parse_return_statement()?);
