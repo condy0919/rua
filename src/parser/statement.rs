@@ -88,9 +88,6 @@ impl<'a, S: io::Read> Parser<'a, S> {
         let _recursion_guard = self.get_recursion_guard();
 
         Ok(match self.peek(0)? {
-            // TODO assignment
-
-            // TODO function call
             Some(&Token::DoubleColon) => {
                 self.expect_next(Token::DoubleColon)?;
                 let name = self.expect_identifier()?;
@@ -122,7 +119,14 @@ impl<'a, S: io::Read> Parser<'a, S> {
                 }
                 _ => Statement::LocalDeclaration(self.parse_local_declaration_statement()?),
             },
+            // functioncall | assignment
+            _ => self.parse_expression_statement()?,
         })
+    }
+
+    /// TODO
+    pub(crate) fn parse_expression_statement(&mut self) -> Result<Statement, ParserError> {
+        todo!()
     }
 
     /// Parses an return statement.
@@ -159,8 +163,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
 
     /// The control structure **while** has the usual meaning.
     ///
-    /// **while** expression **do** block **end**
-    ///
+    /// ```lua
+    /// while expression do block end
+    /// ```
     /// # Cautious
     ///
     /// The condition expression of a control structure can return any value.
@@ -179,7 +184,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
 
     /// The control structure **repeat** has the usual meaning.
     ///
-    /// **repeat** block **until** expression
+    /// ```lua
+    /// repeat block until expression
+    /// ```
     ///
     /// In the repeat–until loop, the inner block does not end at the **until**
     /// keyword, but only after the condition. So, the condition can refer to
@@ -202,7 +209,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
 
     /// The control structure **if** has the usual meaning.
     ///
-    /// **if** expression **then** block (**elseif** expression **then** block)* (**else** block)? **end**
+    /// ```lua
+    /// if expression then block (elseif expression then block)* (else block)? end
+    /// ```
     ///
     /// # Cautious
     ///
@@ -249,7 +258,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// The numerical for loop repeats a block of code while a control variable
     /// runs through an arithmetic progression. It has the following syntax:
     ///
-    /// **for** Name '=' expression ',' expression (',' expression)? **do** block **end**
+    /// ```lua
+    /// for Name '=' expression ',' expression (',' expression)? do block end
+    /// ```
     ///
     /// The _block_ is repeated for name starting at the value of the first
     /// expression, until it passes the second expression by steps of the third
@@ -273,7 +284,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// each iteration, the iterator function is called to produce a new value,
     /// stopping when this new value is **nil**.
     ///
-    /// **for** namelist **in** explist **do** block **end**
+    /// ```lua
+    /// for namelist in explist do block end
+    /// ```
     ///
     /// ## Note
     ///
@@ -343,35 +356,49 @@ impl<'a, S: io::Read> Parser<'a, S> {
         }
     }
 
-    // The function statement syntax sugar simplifies function definition:
-    //
-    // Statement := **function** funcname funcbody
-    // funcname := Name ('.' Name)* (':' Name)?
-    //
-    // For example, the statement
-    //
-    // **function** f() body **end**
-    //
-    // is equivalent with
-    //
-    // f = **function**() body **end**
-    //
-    // The statement
-    //
-    // **function** t.a.b.c.f () body **end**
-    //
-    // is equivalent with
-    //
-    // t.a.b.c.f = **function** () body **end**
-    //
-    // The colon syntax is used for defining methods, that is, functions that
-    // have an implicit extra parameter self. Thus, the statement
-    //
-    // **function** t.a.b.c:f (params) body **end**
-    //
-    // is syntactic sugar for
-    //
-    // t.a.b.c.f = **function** (self, params) body **end**
+    /// The function statement syntax sugar simplifies function definition:
+    ///
+    /// ```lua
+    /// statement ::= function funcname funcbody
+    /// funcname ::= Name ('.' Name)* (':' Name)?
+    /// ```
+    ///
+    /// For example, the statement
+    ///
+    /// ```lua
+    /// function f() body end
+    /// ```
+    ///
+    /// is equivalent with
+    ///
+    /// ```lua
+    /// f = function() body end
+    /// ```
+    ///
+    /// The statement
+    ///
+    /// ```lua
+    /// function t.a.b.c.f () body end
+    /// ```
+    ///
+    /// is equivalent with
+    ///
+    /// ```lua
+    /// t.a.b.c.f = function () body end
+    /// ```
+    ///
+    /// The colon syntax is used for defining methods, that is, functions that
+    /// have an implicit extra parameter self. Thus, the statement
+    ///
+    /// ```lua
+    /// function t.a.b.c:f (params) body end
+    /// ```
+    ///
+    /// is syntactic sugar for
+    ///
+    /// ```lua
+    /// t.a.b.c.f = function (self, params) body end
+    /// ```
     pub(crate) fn parse_function_statement(&mut self) -> Result<FunctionStatement, ParserError> {
         self.expect_next(Token::Function)?;
 
@@ -403,19 +430,27 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// The local function statement syntax sugar simplifies function
     /// definition:
     ///
-    /// **local** **function** Name funcbody
+    /// ```lua
+    /// local function Name funcbody
+    /// ```
     ///
     /// For example, the statement
     ///
-    /// **local** **function** f() body **end**
+    /// ```lua
+    /// local function f() body end
+    /// ```
     ///
     /// is equivalent with
     ///
-    /// **local** f; f = **function** () body **end**
+    /// ```lua
+    /// local f; f = function () body end
+    /// ```
     ///
     /// not
     ///
-    /// **local** f = **function** () body **end**
+    /// ```lua
+    /// local f = function () body end
+    /// ```
     ///
     /// This only makes a difference when the body of the function contains
     /// references to f.
@@ -435,7 +470,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
     ///
     /// The declaration can include an initial assignment:
     ///
-    /// LocalDeclarationStatement := **local** namelist ('=' explist)?
+    /// ```lua
+    /// LocalDeclarationStatement ::= local namelist ('=' explist)?
+    /// ```
     ///
     /// If present, an initial assignment has the same semantics of a multiple
     /// assignment. Otherwise, all variables are initialized with nil.

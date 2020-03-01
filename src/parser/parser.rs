@@ -88,7 +88,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// yielding it
     pub(crate) fn expect_string(&mut self) -> Result<String, ParserError> {
         match self.peek(0)? {
-            Some(Token::String(s)) => {
+            Some(&Token::String(ref s)) => {
                 let s2 = s.clone();
                 self.advance(1);
                 Ok(s2)
@@ -107,7 +107,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// yielding it
     pub(crate) fn expect_identifier(&mut self) -> Result<String, ParserError> {
         match self.peek(0)? {
-            Some(Token::Identifier(s)) => {
+            Some(&Token::Identifier(ref s)) => {
                 let s2 = s.clone();
                 self.advance(1);
                 Ok(s2)
