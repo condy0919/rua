@@ -7,7 +7,7 @@ pub const MIN_OPERATOR_PRECEDENCE: u8 = 0;
 ///
 /// The precedence table:
 ///
-/// ```ignore
+/// ```plain
 /// | operator        | precedence | associativity |
 /// |-----------------|------------|---------------|
 /// | ^               | 12         | right         |
@@ -106,7 +106,7 @@ pub fn get_binary_operator(token: &Token) -> Option<BinaryOperator> {
 ///
 /// The precedence table:
 ///
-/// ```ignore
+/// ```plain
 /// | operator  | precedence | associativity |
 /// |-----------|------------|---------------|
 /// | not - ~ # | 11         | non           |

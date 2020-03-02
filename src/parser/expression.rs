@@ -1,8 +1,8 @@
 use std::io;
 
 use super::{
-    get_binary_operator, get_unary_operator, BinaryOperator, Block, Parser, ParserError,
-    Precedence, UnaryOperator, MIN_OPERATOR_PRECEDENCE,
+    get_binary_operator, get_unary_operator, Associativity, BinaryOperator, Block, Parser,
+    ParserError, Precedence, UnaryOperator, MIN_OPERATOR_PRECEDENCE,
 };
 use crate::lexer::Token;
 
@@ -18,11 +18,24 @@ pub enum Expression {
     String(String),
     Dots,
     Function(FunctionDefinition),
-    FunctionCall(Box<FunctionCall>),
-    MethodCall(Box<MethodCall>),
     TableConstructor(TableConstructor),
+    Suffixed(SuffixedExpression),
     UnaryOperator(UnaryOperator, Box<Expression>),
     BinaryOperator(BinaryOperator, Box<Expression>, Box<Expression>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SuffixedExpression {
+    pub primary: Box<Expression>,
+    pub suffixes: Vec<Suffix>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Suffix {
+    NamedField(String),
+    IndexedField(Expression),
+    FunctionCall(Vec<Expression>),
+    MethodCall(String, Vec<Expression>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,19 +43,6 @@ pub struct FunctionDefinition {
     pub parameters: Vec<String>,
     pub has_varargs: bool,
     pub body: Block,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct FunctionCall {
-    pub func: Expression,
-    pub args: Vec<Expression>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MethodCall {
-    pub obj: Expression,
-    pub method: String,
-    pub args: Vec<Expression>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -63,20 +63,24 @@ pub enum RecordKey {
 }
 
 impl<'a, S: io::Read> Parser<'a, S> {
-    /// TODO document me
-    /// expr -> subexpr
+    /// ```lua
+    /// expr ::= subexpr
+    /// ```
     pub(crate) fn parse_expression(&mut self) -> Result<Expression, ParserError> {
         self.parse_sub_expression(MIN_OPERATOR_PRECEDENCE)
     }
 
-    /// subexpr -> (simpleexp | unop subexpr) { binop subexpr }
+    /// ```lua
+    /// subexpr ::= (simpleexp | unop subexpr) (binop subexpr)*
+    /// ```
     ///
-    /// where 'binop' is any binary operator with a priority higher than
-    /// 'min_precedence'
+    /// where `binop` is any binary operator with a precedence higher than
+    /// `min_precedence` or a right-associative operator whose precedence is
+    /// equal to `min_precedence`
     fn parse_sub_expression(&mut self, min_precedence: u8) -> Result<Expression, ParserError> {
         let _recursion_guard = self.get_recursion_guard()?;
 
-        let _expr = if let Some(unary_op) = self.peek(0)?.and_then(get_unary_operator) {
+        let mut lhs = if let Some(unary_op) = self.peek(0)?.and_then(get_unary_operator) {
             self.advance(1);
             Expression::UnaryOperator(
                 unary_op,
@@ -86,40 +90,26 @@ impl<'a, S: io::Read> Parser<'a, S> {
             self.parse_simple_expression()?
         };
 
-        //
-        // static BinOpr subexpr (LexState *ls, expdesc *v, int limit) {
-        //   BinOpr op;
-        //   UnOpr uop;
-        //   enterlevel(ls);
-        //   uop = getunopr(ls->t.token);
-        //   if (uop != OPR_NOUNOPR) {
-        //     int line = ls->linenumber;
-        //     luaX_next(ls);
-        //     subexpr(ls, v, UNARY_PRIORITY);
-        //     luaK_prefix(ls->fs, uop, v, line);
-        //   }
-        //   else simpleexp(ls, v);
-        //   /* expand while operators have priorities higher than 'limit' */
-        //   op = getbinopr(ls->t.token);
-        //   while (op != OPR_NOBINOPR && priority[op].left > limit) {
-        //     expdesc v2;
-        //     BinOpr nextop;
-        //     int line = ls->linenumber;
-        //     luaX_next(ls);
-        //     luaK_infix(ls->fs, op, v);
-        //     /* read sub-expression with higher priority */
-        //     nextop = subexpr(ls, &v2, priority[op].right);
-        //     luaK_posfix(ls->fs, op, v, &v2, line);
-        //     op = nextop;
-        //   }
-        //   leavelevel(ls);
-        //   return op;  /* return first untreated operator */
-        // }
-        todo!()
+        while let Some(binary_op) = self.peek(0)?.and_then(get_binary_operator) {
+            let (precedence, assoc) = binary_op.precedence();
+            if precedence < min_precedence
+                || precedence == min_precedence && assoc != Associativity::R
+            {
+                break;
+            }
+
+            self.advance(1);
+            let rhs = self.parse_sub_expression(precedence)?;
+            lhs = Expression::BinaryOperator(binary_op, Box::new(lhs), Box::new(rhs));
+        }
+
+        Ok(lhs)
     }
 
-    /// simpleexp -> FLT | INT | STRING | NIL | TRUE | FALSE | ... |
-    /// tableconstructor | FUNCTION body | suffixedexp
+    /// ```lua
+    /// simpleexp ::= Number | Integer | String | Nil | True | False | ... |
+    /// TableConstructor | FUNCTION body | suffixedexp
+    /// ```
     fn parse_simple_expression(&mut self) -> Result<Expression, ParserError> {
         let expr = match self.peek(0)? {
             Some(&Token::Number(n)) => Expression::Number(n),
@@ -144,38 +134,151 @@ impl<'a, S: io::Read> Parser<'a, S> {
         Ok(expr)
     }
 
-    /// suffixedexp -> primaryexp { '.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs }
+    /// A suffixed expression can be an `Identifier`, a table field and function calls.
+    ///
+    /// ```lua
+    /// suffixedexp ::= primaryexp ('.' NAME | '[' exp ']' | ':' NAME funcargs | funcargs)*
+    /// ```
+    ///
+    /// # Identifier
+    ///
+    /// A single name can denote a global variable or a local variable (or a
+    /// function's formal parameter, which is a particular kind of local
+    /// variable):
+    ///
+    /// ```lua
+    /// var ::= Name
+    /// ```
+    ///
+    /// **Name** denotes identifiers.
+    ///
+    /// Any variable name is assumed to be global unless explicitly declared as
+    /// a local. Local variables are lexically scoped: local variables can be
+    /// freely accessed by functions defined inside their scope.
+    ///
+    /// Before the first assignment to a variable, its value is `nil`.
+    ///
+    /// # Table field
+    ///
+    /// Square brackets are used to index a table:
+    ///
+    /// ```lua
+    /// var ::= prefixexp '[' exp ']'
+    /// ```
+    ///
+    /// The meaning of accesses to table fields can be changed via metatables.
+    ///
+    /// The syntax `var.Name` is just syntactic sugar for `var["Name"]`:
+    ///
+    /// ```lua
+    /// var ::= prefixexp '.' Name
+    /// ```
+    ///
+    /// An access to a global variable `x` is equivalent to `_ENV.x`. Due to the
+    /// way that chunks are compiled, `_ENV` is never a global name.
+    ///
+    /// # Function calls
+    ///
+    /// A function call in `Lua` has the following syntax:
+    ///
+    /// ```lua
+    /// functioncall ::= prefixexp args
+    /// ```
+    ///
+    /// In a function call, first prefixexp and args are evaluated. If the value
+    /// of prefixexp has type function, then this function is called with the
+    /// given arguments. Otherwise, the prefixexp "call" metamethod is called,
+    /// having as first argument the value of prefixexp, followed by the
+    /// original call arguments.
+    ///
+    /// The form
+    ///
+    /// ```lua
+    /// functioncall ::= prefixexp ':' Name args
+    /// ```
+    ///
+    /// can be used to call "methods". A call `v:name(args)` is syntactic sugar
+    /// for `v.name(v,args)`, except that `v` is evaluated only once.
+    ///
+    /// Arguments have the following syntax:
+    ///
+    /// ```lua
+    /// args ::= '(' (explist)? ')'
+    /// args ::= TableConstructor
+    /// args ::= LiteralString
+    /// ```
+    ///
+    /// All argument expressions are evaluated before the call. A call of the
+    /// form `f{fields}` is syntactic sugar for `f({fields})`; that is, the
+    /// argument list is a single new table. A call of the form `f'string'` (or
+    /// `f"string"` or `f[[string]]`) is syntactic sugar for `f('string')`; that
+    /// is, the argument list is a single literal string.
     fn parse_suffixed_expression(&mut self) -> Result<Expression, ParserError> {
-        let exp = self.parse_primary_expression()?;
+        let primary = self.parse_primary_expression()?;
+        let mut suffixes = Vec::new();
 
-        match self.peek(0)? {
-            Some(&Token::Dot) => {}
-            Some(&Token::LeftBracket) => {}
-            Some(&Token::Colon) => {} // TODO funcargs
-            _ => {}
-        };
-        todo!()
+        loop {
+            match self.peek(0)? {
+                Some(&Token::Dot) => {
+                    self.expect_next(Token::Dot)?;
+                    suffixes.push(Suffix::NamedField(self.expect_identifier()?));
+                }
+                Some(&Token::LeftBracket) => {
+                    self.expect_next(Token::LeftBracket)?;
+                    suffixes.push(Suffix::IndexedField(self.parse_expression()?));
+                    self.expect_next(Token::RightBracket)?;
+                }
+                Some(&Token::Colon) => {
+                    self.expect_next(Token::Colon)?;
+                    let name = self.expect_identifier()?;
+                    let args = self.parse_function_args()?;
+                    suffixes.push(Suffix::MethodCall(name, args));
+                }
+                // The prefixes of `funcargs`
+                Some(&Token::LeftParen) | Some(&Token::LeftBrace) | Some(&Token::String(_)) => {
+                    suffixes.push(Suffix::FunctionCall(self.parse_function_args()?));
+                }
+                _ => break,
+            }
+        }
+
+        // Nested structures elimination
+        Ok(if suffixes.is_empty() {
+            primary
+        } else {
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(primary),
+                suffixes,
+            })
+        })
     }
 
-    /// primaryexp -> NAME | '(' expr ')'
+    /// ```lua
+    /// primaryexp ::= NAME | '(' expr ')'
+    /// ```
     fn parse_primary_expression(&mut self) -> Result<Expression, ParserError> {
         match self.peek(0)? {
-            Some(&Token::LeftBrace) => {
-                self.expect_next(Token::LeftBrace)?;
+            Some(&Token::LeftParen) => {
+                self.expect_next(Token::LeftParen)?;
                 let expr = self.parse_expression()?;
-                self.expect_next(Token::RightBrace)?;
+                self.expect_next(Token::RightParen)?;
                 Ok(expr)
             }
             Some(&Token::Identifier(_)) => Ok(Expression::Identifier(self.expect_identifier()?)),
             token => Err(ParserError::Unexpected {
                 unexpected: format!("{:?}", token),
-                expected: Some("'(' or Identifier".to_owned()),
+                expected: Some("(expr) or Identifier".to_owned()),
             }),
         }
     }
 
+    /// Parses function arguments.
     ///
-    /// funcargs -> '(' explist? ')' | tableconstructor | literalstring
+    /// ```lua
+    /// funcargs ::= '(' explist? ')' | TableConstructor | String
+    /// ```
+    ///
+    /// where **explist** is optional.
     pub(crate) fn parse_function_args(&mut self) -> Result<Vec<Expression>, ParserError> {
         Ok(match self.peek(0)? {
             Some(&Token::LeftParen) => match self.peek(1)? {
@@ -390,5 +493,348 @@ impl<'a, S: io::Read> Parser<'a, S> {
     pub(crate) fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
         self.expect_next(Token::Function)?;
         self.parse_function_body()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! id {
+        ($name:expr) => {
+            Expression::Identifier($name.to_owned())
+        };
+    }
+
+    #[test]
+    fn primitive_values() {
+        // TODO floating points tests
+        let mut s: &[u8] = br"42 0xf10 'a string' nil true false ... anonymous";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Integer(42));
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::Integer(0xf10)
+        );
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::String("a string".to_owned())
+        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Nil);
+        assert_eq!(parser.parse_expression().unwrap(), Expression::True);
+        assert_eq!(parser.parse_expression().unwrap(), Expression::False);
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Dots);
+        assert_eq!(parser.parse_expression().unwrap(), id!("anonymous"));
+    }
+
+    #[test]
+    fn simple_tableconstructor() {
+        let mut s: &[u8] = br#"{[1]=2,"x","y";x=1,y=1;45}"#;
+        let mut parser = Parser::new(&mut s);
+        let tbl = parser.parse_table_constructor().unwrap();
+        assert_eq!(
+            tbl,
+            TableConstructor {
+                fields: vec![
+                    ConstructorField::Record(
+                        RecordKey::Indexed(Expression::Integer(1)),
+                        Expression::Integer(2)
+                    ),
+                    ConstructorField::Array(Expression::String("x".to_owned())),
+                    ConstructorField::Array(Expression::String("y".to_owned())),
+                    ConstructorField::Record(
+                        RecordKey::Named("x".to_owned()),
+                        Expression::Integer(1)
+                    ),
+                    ConstructorField::Record(
+                        RecordKey::Named("y".to_owned()),
+                        Expression::Integer(1)
+                    ),
+                    ConstructorField::Array(Expression::Integer(45)),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn function_definition() {
+        let mut s: &[u8] = br#"function() end"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_function_definition().unwrap(),
+            FunctionDefinition {
+                parameters: vec![],
+                has_varargs: false,
+                body: Block {
+                    stmts: vec![],
+                    retstmt: None,
+                },
+            }
+        );
+
+        let mut s: &[u8] = br#"function(a) end"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_function_definition().unwrap(),
+            FunctionDefinition {
+                parameters: vec!["a".to_owned()],
+                has_varargs: false,
+                body: Block {
+                    stmts: vec![],
+                    retstmt: None
+                }
+            }
+        );
+
+        let mut s: &[u8] = br#"function(a,b,c,...) end"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_function_definition().unwrap(),
+            FunctionDefinition {
+                parameters: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+                has_varargs: true,
+                body: Block {
+                    stmts: vec![],
+                    retstmt: None
+                }
+            }
+        );
+
+        let mut s: &[u8] = br#"function(...) end"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_function_definition().unwrap(),
+            FunctionDefinition {
+                parameters: vec![],
+                has_varargs: true,
+                body: Block {
+                    stmts: vec![],
+                    retstmt: None
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn suffixed_expression() {
+        let mut s: &[u8] = br#"a.b.c.d a[b].c[d]"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("a")),
+                suffixes: vec![
+                    Suffix::NamedField("b".to_owned()),
+                    Suffix::NamedField("c".to_owned()),
+                    Suffix::NamedField("d".to_owned()),
+                ],
+            })
+        );
+
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("a")),
+                suffixes: vec![
+                    Suffix::IndexedField(id!("b")),
+                    Suffix::NamedField("c".to_owned()),
+                    Suffix::IndexedField(id!("d"))
+                ]
+            })
+        );
+
+        // syntax sugar
+        let mut s: &[u8] = br#"f1() f2'string' f3"string" f4[[string]] f5{1,2}"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f1")),
+                suffixes: vec![Suffix::FunctionCall(vec![]),]
+            })
+        );
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f2")),
+                suffixes: vec![Suffix::FunctionCall(vec![Expression::String(
+                    "string".to_owned()
+                )])]
+            })
+        );
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f3")),
+                suffixes: vec![Suffix::FunctionCall(vec![Expression::String(
+                    "string".to_owned()
+                )])]
+            })
+        );
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f4")),
+                suffixes: vec![Suffix::FunctionCall(vec![Expression::String(
+                    "string".to_owned()
+                )])]
+            })
+        );
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f5")),
+                suffixes: vec![Suffix::FunctionCall(vec![Expression::TableConstructor(
+                    TableConstructor {
+                        fields: vec![
+                            ConstructorField::Array(Expression::Integer(1)),
+                            ConstructorField::Array(Expression::Integer(2)),
+                        ]
+                    }
+                )])]
+            })
+        );
+
+        // method calls
+        let mut s: &[u8] = br#"obj:method1(a)"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("obj")),
+                suffixes: vec![Suffix::MethodCall("method1".to_owned(), vec![id!("a")])],
+            })
+        );
+
+        // function call chains
+        let mut s: &[u8] = br#"f(a)(b)(c)"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_suffixed_expression().unwrap(),
+            Expression::Suffixed(SuffixedExpression {
+                primary: Box::new(id!("f")),
+                suffixes: vec![
+                    Suffix::FunctionCall(vec![id!("a")]),
+                    Suffix::FunctionCall(vec![id!("b")]),
+                    Suffix::FunctionCall(vec![id!("c")])
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn unary_operator() {
+        let mut s: &[u8] = b"-1";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::UnaryOperator(UnaryOperator::Minus, Box::new(Expression::Integer(1)))
+        );
+
+        let mut s: &[u8] = b"not false";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::UnaryOperator(UnaryOperator::Not, Box::new(Expression::False))
+        );
+
+        let mut s: &[u8] = b"~0";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::UnaryOperator(UnaryOperator::BitNot, Box::new(Expression::Integer(0)))
+        );
+
+        let mut s: &[u8] = b"#'empty'";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::UnaryOperator(
+                UnaryOperator::Len,
+                Box::new(Expression::String("empty".to_owned()))
+            )
+        );
+    }
+
+    #[test]
+    fn binary_operator() {
+        // |-----------------|------------|---------------|
+        // | ^               | 12         | right         |
+        // | * / // %        | 10         | left          |
+        // | + -             | 9          | left          |
+        // | ..              | 8          | right         |
+        // | << >>           | 7          | left          |
+        // | &               | 6          | left          |
+        // | ~               | 5          | left          |
+        // | |               | 4          | left          |
+        // | == ~= < <= > >= | 3          | left          |
+        // | and             | 2          | left          |
+        // | or              | 1          | left          |
+        let mut s: &[u8] = b"a+b";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(BinaryOperator::Add, Box::new(id!("a")), Box::new(id!("b")))
+        );
+
+        let mut s: &[u8] = b"(a + b) * c - d";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(
+                BinaryOperator::Sub,
+                Box::new(Expression::BinaryOperator(
+                    BinaryOperator::Mul,
+                    Box::new(Expression::BinaryOperator(
+                        BinaryOperator::Add,
+                        Box::new(id!("a")),
+                        Box::new(id!("b"))
+                    )),
+                    Box::new(id!("c"))
+                )),
+                Box::new(id!("d"))
+            )
+        );
+
+        let mut s: &[u8] = b"a + b * c - d";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(
+                BinaryOperator::Sub,
+                Box::new(Expression::BinaryOperator(
+                    BinaryOperator::Add,
+                    Box::new(id!("a")),
+                    Box::new(Expression::BinaryOperator(
+                        BinaryOperator::Mul,
+                        Box::new(id!("b")),
+                        Box::new(id!("c"))
+                    )),
+                )),
+                Box::new(id!("d"))
+            )
+        );
+
+        let mut s: &[u8] = b"a * -b ^ c - d";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(
+                BinaryOperator::Sub,
+                Box::new(Expression::BinaryOperator(
+                    BinaryOperator::Mul,
+                    Box::new(id!("a")),
+                    Box::new(Expression::UnaryOperator(
+                        UnaryOperator::Minus,
+                        Box::new(Expression::BinaryOperator(
+                            BinaryOperator::Power,
+                            Box::new(id!("b")),
+                            Box::new(id!("c"))
+                        ))
+                    ))
+                )),
+                Box::new(id!("d"))
+            )
+        );
     }
 }
