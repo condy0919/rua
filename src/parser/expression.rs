@@ -77,6 +77,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// where `binop` is any binary operator with a precedence higher than
     /// `min_precedence` or a right-associative operator whose precedence is
     /// equal to `min_precedence`
+    ///
+    /// Visit https://en.wikipedia.org/wiki/Operator-precedence_parser for more
+    /// information.
     fn parse_sub_expression(&mut self, min_precedence: u8) -> Result<Expression, ParserError> {
         let _recursion_guard = self.get_recursion_guard()?;
 
@@ -758,18 +761,6 @@ mod tests {
 
     #[test]
     fn binary_operator() {
-        // |-----------------|------------|---------------|
-        // | ^               | 12         | right         |
-        // | * / // %        | 10         | left          |
-        // | + -             | 9          | left          |
-        // | ..              | 8          | right         |
-        // | << >>           | 7          | left          |
-        // | &               | 6          | left          |
-        // | ~               | 5          | left          |
-        // | |               | 4          | left          |
-        // | == ~= < <= > >= | 3          | left          |
-        // | and             | 2          | left          |
-        // | or              | 1          | left          |
         let mut s: &[u8] = b"a+b";
         let mut parser = Parser::new(&mut s);
         assert_eq!(
@@ -834,6 +825,64 @@ mod tests {
                     ))
                 )),
                 Box::new(id!("d"))
+            )
+        );
+
+        let mut s: &[u8] = b"(1 < 2 and 2 > 1) ~= true";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(
+                BinaryOperator::NotEqual,
+                Box::new(Expression::BinaryOperator(
+                    BinaryOperator::And,
+                    Box::new(Expression::BinaryOperator(
+                        BinaryOperator::LessThan,
+                        Box::new(Expression::Integer(1)),
+                        Box::new(Expression::Integer(2))
+                    )),
+                    Box::new(Expression::BinaryOperator(
+                        BinaryOperator::GreaterThan,
+                        Box::new(Expression::Integer(2)),
+                        Box::new(Expression::Integer(1))
+                    ))
+                )),
+                Box::new(Expression::True)
+            )
+        );
+
+        // illegal actually
+        let mut s: &[u8] = br#"("abc" .. "def") + -(1 // 0)^4>>2 ~ 1 "#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_expression().unwrap(),
+            Expression::BinaryOperator(
+                BinaryOperator::BitXor,
+                Box::new(Expression::BinaryOperator(
+                    BinaryOperator::ShiftRight,
+                    Box::new(Expression::BinaryOperator(
+                        BinaryOperator::Add,
+                        Box::new(Expression::BinaryOperator(
+                            BinaryOperator::Concat,
+                            Box::new(Expression::String("abc".to_owned())),
+                            Box::new(Expression::String("def".to_owned()))
+                        )),
+                        Box::new(Expression::UnaryOperator(
+                            UnaryOperator::Minus,
+                            Box::new(Expression::BinaryOperator(
+                                BinaryOperator::Power,
+                                Box::new(Expression::BinaryOperator(
+                                    BinaryOperator::IDiv,
+                                    Box::new(Expression::Integer(1)),
+                                    Box::new(Expression::Integer(0))
+                                )),
+                                Box::new(Expression::Integer(4))
+                            ))
+                        ))
+                    )),
+                    Box::new(Expression::Integer(2))
+                )),
+                Box::new(Expression::Integer(1))
             )
         );
     }
