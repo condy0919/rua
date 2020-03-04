@@ -41,9 +41,7 @@ pub struct RepeatStatement {
 
 #[derive(Debug, PartialEq)]
 pub struct IfStatement {
-    pub if_then: (Expression, Block),
-    pub some_elseif_then: Vec<(Expression, Block)>,
-    pub else_: Option<Block>,
+    pub if_then: Vec<(Expression, Block)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -213,6 +211,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// if expression then block (elseif expression then block)* (else block)? end
     /// ```
     ///
+    /// Let's transform the last `else block` to `elseif true then block`. So it
+    /// can be merged into the `elseif expression then block` part.
+    ///
     /// # Cautious
     ///
     /// The condition expression of a control structure can return any value.
@@ -220,35 +221,33 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// from **nil** and **false** are considered _true_ (in particular, the
     /// number 0 and the empty string are also true).
     pub(crate) fn parse_if_statement(&mut self) -> Result<IfStatement, ParserError> {
-        self.expect_next(Token::If)?;
-        let if_then_cond = self.parse_expression()?;
-        self.expect_next(Token::Then)?;
-        let if_then_block = self.parse_block()?;
-        let if_then = (if_then_cond, if_then_block);
+        let mut if_then = Vec::new();
 
-        let mut some_elseif_then = Vec::new();
+        self.expect_next(Token::If)?;
+        let expr = self.parse_expression()?;
+        self.expect_next(Token::Then)?;
+        let block = self.parse_block()?;
+        if_then.push((expr, block));
+
         while self.peek(0)? == Some(&Token::ElseIf) {
             self.expect_next(Token::ElseIf)?;
             let expr = self.parse_expression()?;
             self.expect_next(Token::Then)?;
             let block = self.parse_block()?;
-            some_elseif_then.push((expr, block));
+            if_then.push((expr, block));
         }
 
-        let else_ = if self.peek(0)? == Some(&Token::Else) {
+        // transform `else` to `elseif true`
+        if self.peek(0)? == Some(&Token::Else) {
             self.expect_next(Token::Else)?;
-            Some(self.parse_block()?)
-        } else {
-            None
-        };
+            let expr = Expression::True;
+            let block = self.parse_block()?;
+            if_then.push((expr, block));
+        }
 
         self.expect_next(Token::End)?;
 
-        Ok(IfStatement {
-            if_then,
-            some_elseif_then,
-            else_,
-        })
+        Ok(IfStatement { if_then })
     }
 
     /// The for statement has two forms
