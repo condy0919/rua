@@ -113,7 +113,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// simpleexp ::= Number | Integer | String | Nil | True | False | ... |
     /// TableConstructor | FUNCTION body | suffixedexp
     /// ```
-    fn parse_simple_expression(&mut self) -> Result<Expression, ParserError> {
+    pub(crate) fn parse_simple_expression(&mut self) -> Result<Expression, ParserError> {
         let expr = match self.peek(0)? {
             Some(&Token::Number(n)) => Expression::Number(n),
             Some(&Token::Integer(i)) => Expression::Integer(i),
@@ -216,7 +216,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
     /// argument list is a single new table. A call of the form `f'string'` (or
     /// `f"string"` or `f[[string]]`) is syntactic sugar for `f('string')`; that
     /// is, the argument list is a single literal string.
-    fn parse_suffixed_expression(&mut self) -> Result<Expression, ParserError> {
+    pub(crate) fn parse_suffixed_expression(&mut self) -> Result<Expression, ParserError> {
         let primary = self.parse_primary_expression()?;
         let mut suffixes = Vec::new();
 
@@ -362,6 +362,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
         while self.peek(0)? != Some(&Token::RightBrace) {
             match self.peek(0)? {
                 Some(&Token::Comma) | Some(&Token::SemiColon) => {
+                    // FIXME error if first item is comma/semicolon
                     self.advance(1);
                 }
                 Some(&Token::LeftBracket) => {

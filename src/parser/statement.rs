@@ -1,14 +1,16 @@
 use std::io;
 
-use super::{Block, Expression, FunctionDefinition, Parser, ParserError};
+use super::{
+    BinaryOperator, Block, Expression, FunctionDefinition, Parser, ParserError, Suffix,
+    SuffixedExpression, UnaryOperator,
+};
 use crate::lexer::Token;
 
 ///
 #[derive(Debug, PartialEq)]
 pub enum Statement {
-    // : ';'
-    //     | varlist '=' explist
-    //     | functioncall
+    Assignment(AssignmentStatement),
+    FunctionCall(FunctionCallStatement),
     Label(String),
     Break,
     Goto(String),
@@ -20,6 +22,17 @@ pub enum Statement {
     Function(FunctionStatement),
     LocalFunction(LocalFunctionStatement),
     LocalDeclaration(LocalDeclarationStatement),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FunctionCallStatement {
+    pub call: SuffixedExpression,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct AssignmentStatement {
+    pub targets: Vec<Expression>,
+    pub values: Vec<Expression>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -81,6 +94,7 @@ pub struct LocalDeclarationStatement {
 }
 
 impl<'a, S: io::Read> Parser<'a, S> {
+    ///
     /// TODO document me
     pub(crate) fn parse_statement(&mut self) -> Result<Statement, ParserError> {
         let _recursion_guard = self.get_recursion_guard();
@@ -122,9 +136,62 @@ impl<'a, S: io::Read> Parser<'a, S> {
         })
     }
 
-    /// TODO
+    ///
+    /// TODO document me
     pub(crate) fn parse_expression_statement(&mut self) -> Result<Statement, ParserError> {
-        todo!()
+        let suffixed_expression = self.parse_suffixed_expression()?;
+        if self.peek(0)? == Some(&Token::Assign) || self.peek(0)? == Some(&Token::Comma) {
+            let mut targets = Vec::new();
+            targets.push(suffixed_expression);
+            while self.peek(0)? == Some(&Token::Comma) {
+                self.advance(1);
+                targets.push(self.parse_suffixed_expression()?);
+            }
+
+            self.expect_next(Token::Assign)?;
+
+            // type checks
+            for t in &targets {
+                match t {
+                    Expression::Identifier(_) => {}
+                    Expression::Suffixed(SuffixedExpression { primary, suffixes }) => {
+                        assert!(!suffixes.is_empty());
+
+                        match primary.as_ref() {
+                            Expression::Identifier(_) => {}
+                            _ => return Err(ParserError::AssignToExpression),
+                        }
+
+                        match suffixes.last().unwrap() {
+                            Suffix::NamedField(_) | Suffix::IndexedField(_) => {}
+                            _ => return Err(ParserError::AssignToExpression),
+                        }
+                    }
+                    _ => return Err(ParserError::AssignToExpression),
+                }
+            }
+
+            let values = self.parse_expression_list()?;
+            Ok(Statement::Assignment(AssignmentStatement {
+                targets,
+                values,
+            }))
+        } else {
+            match suffixed_expression {
+                Expression::Suffixed(expr) => {
+                    assert!(!expr.suffixes.is_empty());
+                    match expr.suffixes.last().unwrap() {
+                        Suffix::FunctionCall(_) | Suffix::MethodCall(_, _) => {
+                            Ok(Statement::FunctionCall(FunctionCallStatement {
+                                call: expr,
+                            }))
+                        }
+                        _ => Err(ParserError::ExpressionNotStatement),
+                    }
+                }
+                _ => Err(ParserError::ExpressionNotStatement),
+            }
+        }
     }
 
     /// Parses an return statement.
@@ -495,5 +562,471 @@ impl<'a, S: io::Read> Parser<'a, S> {
         };
 
         Ok(LocalDeclarationStatement { names, values })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! id {
+        ($name:expr) => {
+            Expression::Identifier($name.to_owned())
+        };
+    }
+
+    #[test]
+    fn assignment() {
+        let mut s: &[u8] = b"a = 10\nb = 20";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Assignment(AssignmentStatement {
+                targets: vec![id!("a")],
+                values: vec![Expression::Integer(10)]
+            })
+        );
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Assignment(AssignmentStatement {
+                targets: vec![id!("b")],
+                values: vec![Expression::Integer(20)],
+            })
+        );
+
+        let mut s: &[u8] = b"a,b,c=1,2,3";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Assignment(AssignmentStatement {
+                targets: vec![id!("a"), id!("b"), id!("c")],
+                values: vec![
+                    Expression::Integer(1),
+                    Expression::Integer(2),
+                    Expression::Integer(3)
+                ],
+            })
+        );
+
+        let mut s: &[u8] = b"f(1) = 10";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap_err(),
+            ParserError::AssignToExpression
+        );
+
+        let mut s: &[u8] = b"a + b = 10";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap_err(),
+            ParserError::ExpressionNotStatement
+        );
+    }
+
+    #[test]
+    fn function_call() {
+        let mut s: &[u8] = br#"f(1, "string")"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::FunctionCall(FunctionCallStatement {
+                call: SuffixedExpression {
+                    primary: Box::new(id!("f")),
+                    suffixes: vec![Suffix::FunctionCall(vec![
+                        Expression::Integer(1),
+                        Expression::String("string".to_owned())
+                    ])],
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn label_goto() {
+        let mut s: &[u8] = b"::label:: goto label";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Label("label".to_owned())
+        );
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Goto("label".to_owned())
+        );
+    }
+
+    #[test]
+    fn do_block() {
+        let mut s: &[u8] = b"do a=10 end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Do(Block {
+                stmts: vec![Statement::Assignment(AssignmentStatement {
+                    targets: vec![id!("a")],
+                    values: vec![Expression::Integer(10)],
+                })],
+                retstmt: None,
+            })
+        );
+    }
+
+    #[test]
+    fn while_loop() {
+        let mut s: &[u8] = b"while true do a=10 end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::While(WhileStatement {
+                condition: Expression::True,
+                block: Block {
+                    stmts: vec![Statement::Assignment(AssignmentStatement {
+                        targets: vec![id!("a")],
+                        values: vec![Expression::Integer(10)]
+                    })],
+                    retstmt: None,
+                }
+            })
+        )
+    }
+
+    #[test]
+    fn repeat_loop() {
+        let mut s: &[u8] = b"repeat until a~=0";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Repeat(RepeatStatement {
+                block: Block {
+                    stmts: vec![],
+                    retstmt: None,
+                },
+                until: Expression::BinaryOperator(
+                    BinaryOperator::NotEqual,
+                    Box::new(id!("a")),
+                    Box::new(Expression::Integer(0))
+                )
+            })
+        );
+    }
+
+    #[test]
+    fn for_numeric_loop() {
+        let mut s: &[u8] = b"for i=0,10,1 do a=10 end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::For(ForStatement::Numeric {
+                name: "i".to_owned(),
+                initial: Expression::Integer(0),
+                limit: Expression::Integer(10),
+                step: Some(Expression::Integer(1)),
+                block: Block {
+                    stmts: vec![Statement::Assignment(AssignmentStatement {
+                        targets: vec![id!("a")],
+                        values: vec![Expression::Integer(10)],
+                    })],
+                    retstmt: None,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn for_generic_loop() {
+        let mut s: &[u8] = br#"
+function test_iterator()
+    local function inc(s, c)
+        if c == 10 then
+            return nil
+        else
+            return c + 1, c + 11
+        end
+    end
+
+    return inc, nil, 0
+end
+
+local sum = 0
+for i in test_iterator() do
+    sum = sum + i
+end
+"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Function(FunctionStatement {
+                name: "test_iterator".to_owned(),
+                fields: vec![],
+                method: None,
+                definition: FunctionDefinition {
+                    parameters: vec![],
+                    has_varargs: false,
+                    body: Block {
+                        stmts: vec![Statement::LocalFunction(LocalFunctionStatement {
+                            name: "inc".to_owned(),
+                            definition: FunctionDefinition {
+                                parameters: vec!["s".to_owned(), "c".to_owned()],
+                                has_varargs: false,
+                                body: Block {
+                                    stmts: vec![Statement::If(IfStatement {
+                                        if_then: vec![
+                                            (
+                                                Expression::BinaryOperator(
+                                                    BinaryOperator::Equal,
+                                                    Box::new(id!("c")),
+                                                    Box::new(Expression::Integer(10))
+                                                ),
+                                                Block {
+                                                    stmts: vec![],
+                                                    retstmt: Some(ReturnStatement {
+                                                        returns: vec![Expression::Nil]
+                                                    })
+                                                }
+                                            ),
+                                            (
+                                                Expression::True,
+                                                Block {
+                                                    stmts: vec![],
+                                                    retstmt: Some(ReturnStatement {
+                                                        returns: vec![
+                                                            Expression::BinaryOperator(
+                                                                BinaryOperator::Add,
+                                                                Box::new(id!("c")),
+                                                                Box::new(Expression::Integer(1))
+                                                            ),
+                                                            Expression::BinaryOperator(
+                                                                BinaryOperator::Add,
+                                                                Box::new(id!("c")),
+                                                                Box::new(Expression::Integer(11))
+                                                            )
+                                                        ]
+                                                    })
+                                                }
+                                            )
+                                        ]
+                                    })],
+                                    retstmt: None,
+                                }
+                            }
+                        })],
+                        retstmt: Some(ReturnStatement {
+                            returns: vec![id!("inc"), Expression::Nil, Expression::Integer(0)]
+                        })
+                    }
+                }
+            })
+        );
+
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::LocalDeclaration(LocalDeclarationStatement {
+                names: vec!["sum".to_owned()],
+                values: vec![Expression::Integer(0)]
+            })
+        );
+
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::For(ForStatement::Generic {
+                names: vec!["i".to_owned()],
+                values: vec![Expression::Suffixed(SuffixedExpression {
+                    primary: Box::new(id!("test_iterator")),
+                    suffixes: vec![Suffix::FunctionCall(vec![])]
+                })],
+                block: Block {
+                    stmts: vec![Statement::Assignment(AssignmentStatement {
+                        targets: vec![id!("sum")],
+                        values: vec![Expression::BinaryOperator(
+                            BinaryOperator::Add,
+                            Box::new(id!("sum")),
+                            Box::new(id!("i"))
+                        )],
+                    })],
+                    retstmt: None,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn if_stmt() {
+        let mut s: &[u8] = b"if true then else end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::If(IfStatement {
+                if_then: vec![
+                    (
+                        Expression::True,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None
+                        }
+                    ),
+                    (
+                        Expression::True,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None
+                        }
+                    )
+                ],
+            })
+        );
+
+        let mut s: &[u8] = b"if false then elseif false then end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::If(IfStatement {
+                if_then: vec![
+                    (
+                        Expression::False,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None
+                        }
+                    ),
+                    (
+                        Expression::False,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None
+                        }
+                    )
+                ]
+            })
+        );
+
+        let mut s: &[u8] = b"if true then elseif false then else end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::If(IfStatement {
+                if_then: vec![
+                    (
+                        Expression::True,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None,
+                        }
+                    ),
+                    (
+                        Expression::False,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None
+                        }
+                    ),
+                    (
+                        Expression::True,
+                        Block {
+                            stmts: vec![],
+                            retstmt: None,
+                        }
+                    )
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn function() {
+        let mut s: &[u8] = br#"function one() return 1 end
+                               function add1(x) return x+1 end
+                               function t.a.b.c:f() end"#;
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Function(FunctionStatement {
+                name: "one".to_owned(),
+                fields: vec![],
+                method: None,
+                definition: FunctionDefinition {
+                    parameters: vec![],
+                    has_varargs: false,
+                    body: Block {
+                        stmts: vec![],
+                        retstmt: Some(ReturnStatement {
+                            returns: vec![Expression::Integer(1)]
+                        })
+                    }
+                }
+            })
+        );
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Function(FunctionStatement {
+                name: "add1".to_owned(),
+                fields: vec![],
+                method: None,
+                definition: FunctionDefinition {
+                    parameters: vec!["x".to_owned()],
+                    has_varargs: false,
+                    body: Block {
+                        stmts: vec![],
+                        retstmt: Some(ReturnStatement {
+                            returns: vec![Expression::BinaryOperator(
+                                BinaryOperator::Add,
+                                Box::new(id!("x")),
+                                Box::new(Expression::Integer(1))
+                            )]
+                        })
+                    }
+                }
+            })
+        );
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::Function(FunctionStatement {
+                name: "t".to_owned(),
+                fields: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+                method: Some("f".to_owned()),
+                definition: FunctionDefinition {
+                    parameters: vec![],
+                    has_varargs: false,
+                    body: Block {
+                        stmts: vec![],
+                        retstmt: None,
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn local_function() {
+        let mut s: &[u8] = b"local function one() return 1 end";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::LocalFunction(LocalFunctionStatement {
+                name: "one".to_owned(),
+                definition: FunctionDefinition {
+                    parameters: vec![],
+                    has_varargs: false,
+                    body: Block {
+                        stmts: vec![],
+                        retstmt: Some(ReturnStatement {
+                            returns: vec![Expression::Integer(1)]
+                        })
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn local_declaration() {
+        let mut s: &[u8] = b"local a, b, c = 10, 20";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_statement().unwrap(),
+            Statement::LocalDeclaration(LocalDeclarationStatement {
+                names: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
+                values: vec![Expression::Integer(10), Expression::Integer(20)]
+            })
+        );
     }
 }
