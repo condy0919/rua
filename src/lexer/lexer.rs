@@ -33,7 +33,23 @@ const LUA_KEYWORDS: phf::Map<&'static str, Token> = phf_map! {
     "while" => Token::While,
 };
 
+/// A lexical token is a string with an assigned and thus identified meaning. It
+/// is structured as a pair consisting of a token name and an optional token
+/// value.
 ///
+/// In `Lua`, the following _keywords_ are reserved and cannot be used as
+/// identifiers.
+///
+/// `and` `break` `do` `else` `elseif` `end` `false` `for` `function` `goto`
+/// `if` `in` `local` `nil` `not` `or` `repeat` `return` `then` `true` `until`
+/// `while`
+///
+/// The following strings denote other tokens:
+///
+/// `+` `-` `*` `/` `%` `^` `#` `&` `~` `|` `<<` `>>` `//` `==` `~=` `<=` `>=`
+/// `<` `>` `=` `(` `)` `{` `}` `[` `]` `::` `;` `:` `,` `.` `..` `...`
+///
+/// Plus `None` variant which indicates `EOF`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     And,
@@ -98,6 +114,7 @@ pub enum Token {
     None,
 }
 
+/// `Lua` lexer error
 #[derive(Debug, PartialEq)]
 pub enum LexerError {
     UnfinishedShortString(u8),
@@ -112,7 +129,7 @@ pub enum LexerError {
     InvalidEscape,
     InvalidLongStringDelimiter,
     BadNumber,
-    IOErrorKind(io::ErrorKind),
+    IOError(String),
 }
 
 impl fmt::Display for LexerError {
@@ -138,7 +155,7 @@ impl fmt::Display for LexerError {
             LexerError::InvalidEscape => write!(f, "invalid escape sequence"),
             LexerError::InvalidLongStringDelimiter => write!(f, "invalid long string delimiter"),
             LexerError::BadNumber => write!(f, "malformed number"),
-            LexerError::IOErrorKind(e) => write!(f, "IO ErrorKind: {:?}", e),
+            LexerError::IOError(s) => write!(f, "IO Error: {}", s),
         }
     }
 }
@@ -146,9 +163,14 @@ impl fmt::Display for LexerError {
 impl error::Error for LexerError {}
 
 /// Lexer
+///
+/// See https://en.wikipedia.org/wiki/Lexical_analysis for more information.
 pub struct Lexer<'a, S: io::Read> {
+    /// Source file
     src: &'a mut S,
+    /// Characters buffer
     peek_buf: Vec<u8>,
+    /// Input line counter
     line: usize,
 }
 
@@ -216,6 +238,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
                 }
 
+                // long string or simply '['
                 b'[' => match self.peek(1)? {
                     Some(b'=') | Some(b'[') => {
                         return self.read_long_string();
@@ -226,6 +249,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
                 },
 
+                // short literal strings
                 b'\"' | b'\'' => {
                     return self.read_short_string();
                 }
@@ -280,6 +304,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     }
                 }
 
+                // '.', '..', '...', or number
                 b'.' => {
                     if self.peek(1)? == Some(b'.') {
                         if self.peek(2)? == Some(b'.') {
@@ -306,6 +331,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                     return self.read_numeral();
                 }
 
+                // identifier or reserved word?
                 c if c.is_ascii_alphabetic() || c == b'_' => {
                     let mut string_buf = Vec::new();
                     string_buf.push(c);
@@ -335,7 +361,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
         })
     }
 
-    /// Peeks n-bytes ahead
+    /// Peeks (n+1)-bytes ahead, and returns the n-th byte if possible
     pub(crate) fn peek(&mut self, n: usize) -> Result<Option<u8>, LexerError> {
         while self.peek_buf.len() <= n {
             let mut c = [0];
@@ -348,7 +374,7 @@ impl<'a, S: io::Read> Lexer<'a, S> {
                 }
                 Err(e) => {
                     if e.kind() != io::ErrorKind::Interrupted {
-                        return Err(LexerError::IOErrorKind(e.kind()));
+                        return Err(LexerError::IOError(e.to_string()));
                     }
                 }
             }
