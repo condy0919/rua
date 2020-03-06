@@ -6,7 +6,9 @@ use super::{
 };
 use crate::lexer::Token;
 
-///
+/// Lua supports an almost conventional set of statements, similar to those in
+/// Pascal or C. This set includes assignments, control structures, function
+/// calls, and variable declarations.
 #[derive(Debug, PartialEq)]
 pub enum Statement {
     Assignment(AssignmentStatement),
@@ -94,8 +96,9 @@ pub struct LocalDeclarationStatement {
 }
 
 impl<'a, S: io::Read> Parser<'a, S> {
+    /// Parses a statement.
     ///
-    /// TODO document me
+    /// Although FunctionCall is an expression, it can also be a statement.
     pub(crate) fn parse_statement(&mut self) -> Result<Statement, ParserError> {
         let _recursion_guard = self.get_recursion_guard();
 
@@ -136,8 +139,9 @@ impl<'a, S: io::Read> Parser<'a, S> {
         })
     }
 
+    /// Parses an expression statement.
     ///
-    /// TODO document me
+    /// An expression statement is a function call or an assignment.
     pub(crate) fn parse_expression_statement(&mut self) -> Result<Statement, ParserError> {
         let suffixed_expression = self.parse_suffixed_expression()?;
         if self.peek(0)? == Some(&Token::Assign) || self.peek(0)? == Some(&Token::Comma) {

@@ -6,7 +6,31 @@ use super::{
 };
 use crate::lexer::Token;
 
-/// TODO document me
+/// An expression in `Lua` can be:
+///
+/// - `nil`
+/// - `true`
+/// - `false`
+/// - String
+/// - `Integer`
+/// - `Number`
+/// - Table
+/// - `...`
+/// - Identifier
+/// - Expression **BinaryOperator** Expression
+/// - **UnaryOperator** Expression
+/// - `(` Expression `)`
+/// - Function call
+///
+/// `Integer` and `Number` are explained in **lexer** module.
+///
+/// `nil`, `true`, `false`, String and Identifier are identical to their
+/// **lexer** tokens.
+///
+/// See [`parse_table_constructor`] for the definition of a Table.
+///
+/// The precedence of binary operators and unary operators are explained in
+/// [`operator`] module.
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     Nil,
@@ -24,6 +48,15 @@ pub enum Expression {
     BinaryOperator(BinaryOperator, Box<Expression>, Box<Expression>),
 }
 
+/// `SuffixedExpression` is a specical case of `Expression`.
+///
+/// It can be the following:
+///
+/// - `a.b` denotes table fields selector. A syntax sugar of `a["b"]`
+/// - `a[b]` denotes table indexed selector.
+/// - `a.b()` denotes a function call
+/// - `a.b:c()` denotes a method call which implies the first parameter is the
+///   self
 #[derive(Debug, PartialEq)]
 pub struct SuffixedExpression {
     pub primary: Box<Expression>,
@@ -38,6 +71,7 @@ pub enum Suffix {
     MethodCall(String, Vec<Expression>),
 }
 
+/// A function definition more likely an anonymous function.
 #[derive(Debug, PartialEq)]
 pub struct FunctionDefinition {
     pub parameters: Vec<String>,
@@ -362,7 +396,13 @@ impl<'a, S: io::Read> Parser<'a, S> {
         while self.peek(0)? != Some(&Token::RightBrace) {
             match self.peek(0)? {
                 Some(&Token::Comma) | Some(&Token::SemiColon) => {
-                    // FIXME error if first item is comma/semicolon
+                    if fields.is_empty() {
+                        return Err(ParserError::Unexpected {
+                            unexpected: format!("comma or semicolon after {{"),
+                            expected: None,
+                        });
+                    }
+
                     self.advance(1);
                 }
                 Some(&Token::LeftBracket) => {
@@ -510,16 +550,24 @@ mod tests {
         };
     }
 
+    const EPS: f64 = 1e-5;
+    fn float_equal(exp: Expression, f: f64) -> bool {
+        match exp {
+            Expression::Number(n) => (n - f).abs() < EPS,
+            _ => false,
+        }
+    }
+
     #[test]
     fn primitive_values() {
-        // TODO floating points tests
-        let mut s: &[u8] = br"42 0xf10 'a string' nil true false ... anonymous";
+        let mut s: &[u8] = br"42 0xf10 1.5 'a string' nil true false ... anonymous";
         let mut parser = Parser::new(&mut s);
         assert_eq!(parser.parse_expression().unwrap(), Expression::Integer(42));
         assert_eq!(
             parser.parse_expression().unwrap(),
             Expression::Integer(0xf10)
         );
+        assert!(float_equal(parser.parse_expression().unwrap(), 1.5));
         assert_eq!(
             parser.parse_expression().unwrap(),
             Expression::String("a string".to_owned())
@@ -535,9 +583,8 @@ mod tests {
     fn simple_tableconstructor() {
         let mut s: &[u8] = br#"{[1]=2,"x","y";x=1,y=1;45}"#;
         let mut parser = Parser::new(&mut s);
-        let tbl = parser.parse_table_constructor().unwrap();
         assert_eq!(
-            tbl,
+            parser.parse_table_constructor().unwrap(),
             TableConstructor {
                 fields: vec![
                     ConstructorField::Record(
@@ -556,6 +603,16 @@ mod tests {
                     ),
                     ConstructorField::Array(Expression::Integer(45)),
                 ],
+            }
+        );
+
+        let mut s: &[u8] = b"{; 2; 3; }";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(
+            parser.parse_table_constructor().unwrap_err(),
+            ParserError::Unexpected {
+                unexpected: format!("comma or semicolon after {{"),
+                expected: None
             }
         );
     }

@@ -5,7 +5,16 @@ use std::rc::Rc;
 
 use crate::lexer::{Lexer, LexerError, Token};
 
-/// TODO document me
+/// ParserError
+///
+/// There are 6 errors when parsing:
+///
+/// - `Unexpected` token encountered
+/// - `EndOfStream` early ended
+/// - `AssignToExpression` invalid assignment
+/// - `ExpressionNotStatement` SuffixedExpression needed
+/// - `RecursionLimit` the recursion depth deeper than `MAX_RECURSION`
+/// - `LexerError` lexer level error
 #[derive(Debug, PartialEq)]
 pub enum ParserError {
     Unexpected {
@@ -53,7 +62,12 @@ impl fmt::Display for ParserError {
 
 impl error::Error for ParserError {}
 
-/// TODO document me
+/// Parser
+///
+/// It implements a recursive decent parser.
+///
+/// Visit https://en.wikipedia.org/wiki/Recursive_descent_parser for more
+/// information.
 pub struct Parser<'a, S: io::Read> {
     lexer: Lexer<'a, S>,
     tokens: Vec<Token>,
