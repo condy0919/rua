@@ -12,3 +12,6 @@ pub use self::statement::*;
 
 pub mod parser;
 pub use self::parser::*;
+
+mod consteval;
+use self::consteval::*;
