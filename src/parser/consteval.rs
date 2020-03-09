@@ -115,13 +115,13 @@ fn consteval_binary_expression(mut expr: Expression) -> Result<Expression, Parse
 
             match **lhs {
                 Expression::Integer(i1) => match **rhs {
-                    Expression::Integer(i2) => Ok(ConstEvalArithmetic::eval(op, i1, i2)),
-                    Expression::Number(n2) => Ok(ConstEvalArithmetic::eval(op, i1 as f64, n2)),
+                    Expression::Integer(i2) => ConstEvalArithmetic::eval(op, i1, i2),
+                    Expression::Number(n2) => ConstEvalArithmetic::eval(op, i1 as f64, n2),
                     _ => Ok(expr),
                 },
                 Expression::Number(n1) => match **rhs {
-                    Expression::Integer(i2) => Ok(ConstEvalArithmetic::eval(op, n1, i2 as f64)),
-                    Expression::Number(n2) => Ok(ConstEvalArithmetic::eval(op, n1, n2)),
+                    Expression::Integer(i2) => ConstEvalArithmetic::eval(op, n1, i2 as f64),
+                    Expression::Number(n2) => ConstEvalArithmetic::eval(op, n1, n2),
                     _ => Ok(expr),
                 },
                 _ => Ok(expr),
@@ -285,7 +285,16 @@ fn expression_compare(lhs: &Expression, rhs: &Expression) -> Option<bool> {
 
         // String
         (Expression::String(s1), Expression::String(s2)) => Some(s1 == s2),
-        (Expression::String(_), _) | (_, Expression::String(_)) => Some(false),
+        (Expression::String(_), Expression::Nil)
+        | (Expression::String(_), Expression::True)
+        | (Expression::String(_), Expression::False)
+        | (Expression::String(_), Expression::Integer(_))
+        | (Expression::String(_), Expression::Number(_)) => Some(false),
+        (Expression::Nil, Expression::String(_))
+        | (Expression::True, Expression::String(_))
+        | (Expression::False, Expression::String(_))
+        | (Expression::Integer(_), Expression::String(_))
+        | (Expression::Number(_), Expression::String(_)) => Some(false),
 
         // Number/Integer
         (Expression::Integer(i1), Expression::Integer(i2)) => Some(i1 == i2),
@@ -296,10 +305,18 @@ fn expression_compare(lhs: &Expression, rhs: &Expression) -> Option<bool> {
             Some((n1 - (*i2 as f64)).abs() < f64::EPSILON)
         }
         (Expression::Number(n1), Expression::Number(n2)) => Some((n1 - n2).abs() < f64::EPSILON),
-        (Expression::Integer(_), _)
-        | (Expression::Number(_), _)
-        | (_, Expression::Integer(_))
-        | (_, Expression::Number(_)) => Some(false),
+        (Expression::Integer(_), Expression::Nil)
+        | (Expression::Integer(_), Expression::True)
+        | (Expression::Integer(_), Expression::False) => Some(false),
+        (Expression::Nil, Expression::Integer(_))
+        | (Expression::True, Expression::Integer(_))
+        | (Expression::False, Expression::Integer(_)) => Some(false),
+        (Expression::Number(_), Expression::Nil)
+        | (Expression::Number(_), Expression::True)
+        | (Expression::Number(_), Expression::False) => Some(false),
+        (Expression::Nil, Expression::Number(_))
+        | (Expression::True, Expression::Number(_))
+        | (Expression::False, Expression::Number(_)) => Some(false),
 
         // Nil
         (Expression::Nil, Expression::Nil) => Some(true),
@@ -357,17 +374,27 @@ fn suffixed_expression_compare(lhs: &SuffixedExpression, rhs: &SuffixedExpressio
 //
 // `/` (Div) and `^` (Power) always produce `Number` types.
 trait ConstEvalArithmetic<T, U> {
-    fn eval(self, lhs: T, rhs: U) -> Expression;
+    fn eval(self, lhs: T, rhs: U) -> Result<Expression, ParserError>;
 }
 
 impl ConstEvalArithmetic<i64, i64> for BinaryOperator {
-    fn eval(self, lhs: i64, rhs: i64) -> Expression {
-        match self {
+    fn eval(self, lhs: i64, rhs: i64) -> Result<Expression, ParserError> {
+        Ok(match self {
             BinaryOperator::Add => Expression::Integer(lhs + rhs),
             BinaryOperator::Sub => Expression::Integer(lhs - rhs),
             BinaryOperator::Mul => Expression::Integer(lhs * rhs),
-            BinaryOperator::Div => Expression::Number(lhs as f64 / rhs as f64),
-            BinaryOperator::IDiv => Expression::Integer(lhs / rhs),
+            BinaryOperator::Div => {
+                if rhs == 0 {
+                    return Err(ParserError::DividedByZero);
+                }
+                Expression::Number(lhs as f64 / rhs as f64)
+            }
+            BinaryOperator::IDiv => {
+                if rhs == 0 {
+                    return Err(ParserError::DividedByZero);
+                }
+                Expression::Integer(lhs / rhs)
+            }
             BinaryOperator::Mod => Expression::Integer(lhs % rhs),
             BinaryOperator::Power => Expression::Number((lhs as f64).powf(rhs as f64)),
             BinaryOperator::LessThan => {
@@ -399,13 +426,13 @@ impl ConstEvalArithmetic<i64, i64> for BinaryOperator {
                 }
             }
             _ => unreachable!(),
-        }
+        })
     }
 }
 
 impl ConstEvalArithmetic<f64, f64> for BinaryOperator {
-    fn eval(self, lhs: f64, rhs: f64) -> Expression {
-        match self {
+    fn eval(self, lhs: f64, rhs: f64) -> Result<Expression, ParserError> {
+        Ok(match self {
             BinaryOperator::Add => Expression::Number(lhs + rhs),
             BinaryOperator::Sub => Expression::Number(lhs - rhs),
             BinaryOperator::Mul => Expression::Number(lhs * rhs),
@@ -442,7 +469,7 @@ impl ConstEvalArithmetic<f64, f64> for BinaryOperator {
                 }
             }
             _ => unreachable!(),
-        }
+        })
     }
 }
 

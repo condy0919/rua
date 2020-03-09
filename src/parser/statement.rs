@@ -1,8 +1,7 @@
 use std::io;
 
 use super::{
-    BinaryOperator, Block, Expression, FunctionDefinition, Parser, ParserError, Suffix,
-    SuffixedExpression, UnaryOperator,
+    Block, Expression, FunctionDefinition, Parser, ParserError, Suffix, SuffixedExpression,
 };
 use crate::lexer::Token;
 
@@ -572,6 +571,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::BinaryOperator;
 
     macro_rules! id {
         ($name:expr) => {

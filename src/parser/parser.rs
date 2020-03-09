@@ -28,6 +28,7 @@ pub enum ParserError {
     ExpressionNotStatement,
     RecursionLimit,
     LexerError(LexerError),
+    DividedByZero,
 }
 
 impl fmt::Display for ParserError {
@@ -56,6 +57,7 @@ impl fmt::Display for ParserError {
             ParserError::ExpressionNotStatement => write!(f, "expression is not a statement"),
             ParserError::RecursionLimit => write!(f, "recursion limit reached"),
             ParserError::LexerError(e) => write!(f, "{}", e),
+            ParserError::DividedByZero => write!(f, "divided by zero"),
         }
     }
 }

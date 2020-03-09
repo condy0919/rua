@@ -1,8 +1,8 @@
 use std::io;
 
 use super::{
-    get_binary_operator, get_unary_operator, Associativity, BinaryOperator, Block, Parser,
-    ParserError, Precedence, UnaryOperator, MIN_OPERATOR_PRECEDENCE,
+    consteval_expression, get_binary_operator, get_unary_operator, Associativity, BinaryOperator,
+    Block, Parser, ParserError, Precedence, UnaryOperator, MIN_OPERATOR_PRECEDENCE,
 };
 use crate::lexer::Token;
 
@@ -125,10 +125,10 @@ impl<'a, S: io::Read> Parser<'a, S> {
 
         let mut lhs = if let Some(unary_op) = self.peek(0)?.and_then(get_unary_operator) {
             self.advance(1);
-            Expression::UnaryOperator(
+            consteval_expression(Expression::UnaryOperator(
                 unary_op,
                 Box::new(self.parse_sub_expression(unary_op.precedence().0)?),
-            )
+            ))?
         } else {
             self.parse_simple_expression()?
         };
@@ -143,7 +143,11 @@ impl<'a, S: io::Read> Parser<'a, S> {
 
             self.advance(1);
             let rhs = self.parse_sub_expression(precedence)?;
-            lhs = Expression::BinaryOperator(binary_op, Box::new(lhs), Box::new(rhs));
+            lhs = consteval_expression(Expression::BinaryOperator(
+                binary_op,
+                Box::new(lhs),
+                Box::new(rhs),
+            ))?;
         }
 
         Ok(lhs)
@@ -286,6 +290,15 @@ impl<'a, S: io::Read> Parser<'a, S> {
         }
 
         // Nested structures elimination
+        //
+        // NOTE Incompatible with Lua 5.3
+        //
+        // ```lua
+        // function f() return nil, nil, nil end
+        //
+        // -- returned value discarding not support
+        // local a = (f())
+        // ```
         Ok(if suffixes.is_empty() {
             primary
         } else {
@@ -556,10 +569,9 @@ mod tests {
         };
     }
 
-    const EPS: f64 = 1e-5;
     fn float_equal(exp: Expression, f: f64) -> bool {
         match exp {
-            Expression::Number(n) => (n - f).abs() < EPS,
+            Expression::Number(n) => (n - f).abs() < std::f64::EPSILON,
             _ => false,
         }
     }
@@ -793,34 +805,19 @@ mod tests {
     fn unary_operator() {
         let mut s: &[u8] = b"-1";
         let mut parser = Parser::new(&mut s);
-        assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::UnaryOperator(UnaryOperator::Minus, Box::new(Expression::Integer(1)))
-        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Integer(-1));
 
         let mut s: &[u8] = b"not false";
         let mut parser = Parser::new(&mut s);
-        assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::UnaryOperator(UnaryOperator::Not, Box::new(Expression::False))
-        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::True);
 
         let mut s: &[u8] = b"~0";
         let mut parser = Parser::new(&mut s);
-        assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::UnaryOperator(UnaryOperator::BitNot, Box::new(Expression::Integer(0)))
-        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Integer(-1));
 
         let mut s: &[u8] = b"#'empty'";
         let mut parser = Parser::new(&mut s);
-        assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::UnaryOperator(
-                UnaryOperator::Len,
-                Box::new(Expression::String("empty".to_owned()))
-            )
-        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::Integer(5));
     }
 
     #[test]
@@ -894,60 +891,16 @@ mod tests {
 
         let mut s: &[u8] = b"(1 < 2 and 2 > 1) ~= true";
         let mut parser = Parser::new(&mut s);
-        assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::BinaryOperator(
-                BinaryOperator::NotEqual,
-                Box::new(Expression::BinaryOperator(
-                    BinaryOperator::And,
-                    Box::new(Expression::BinaryOperator(
-                        BinaryOperator::LessThan,
-                        Box::new(Expression::Integer(1)),
-                        Box::new(Expression::Integer(2))
-                    )),
-                    Box::new(Expression::BinaryOperator(
-                        BinaryOperator::GreaterThan,
-                        Box::new(Expression::Integer(2)),
-                        Box::new(Expression::Integer(1))
-                    ))
-                )),
-                Box::new(Expression::True)
-            )
-        );
+        assert_eq!(parser.parse_expression().unwrap(), Expression::False);
 
-        // illegal actually
+        // Illegal actually.
+        //
+        // Discovered after applying consteval.
         let mut s: &[u8] = br#"("abc" .. "def") + -(1 // 0)^4>>2 ~ 1 "#;
         let mut parser = Parser::new(&mut s);
         assert_eq!(
-            parser.parse_expression().unwrap(),
-            Expression::BinaryOperator(
-                BinaryOperator::BitXor,
-                Box::new(Expression::BinaryOperator(
-                    BinaryOperator::ShiftRight,
-                    Box::new(Expression::BinaryOperator(
-                        BinaryOperator::Add,
-                        Box::new(Expression::BinaryOperator(
-                            BinaryOperator::Concat,
-                            Box::new(Expression::String("abc".to_owned())),
-                            Box::new(Expression::String("def".to_owned()))
-                        )),
-                        Box::new(Expression::UnaryOperator(
-                            UnaryOperator::Minus,
-                            Box::new(Expression::BinaryOperator(
-                                BinaryOperator::Power,
-                                Box::new(Expression::BinaryOperator(
-                                    BinaryOperator::IDiv,
-                                    Box::new(Expression::Integer(1)),
-                                    Box::new(Expression::Integer(0))
-                                )),
-                                Box::new(Expression::Integer(4))
-                            ))
-                        ))
-                    )),
-                    Box::new(Expression::Integer(2))
-                )),
-                Box::new(Expression::Integer(1))
-            )
+            parser.parse_expression().unwrap_err(),
+            ParserError::DividedByZero
         );
     }
 }
