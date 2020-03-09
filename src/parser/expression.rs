@@ -417,7 +417,7 @@ impl<'a, S: io::Read> Parser<'a, S> {
                 Some(&Token::Comma) | Some(&Token::SemiColon) => {
                     if fields.is_empty() {
                         return Err(ParserError::Unexpected {
-                            unexpected: format!("comma or semicolon after {{"),
+                            unexpected: "comma or semicolon after {".to_string(),
                             expected: None,
                         });
                     }

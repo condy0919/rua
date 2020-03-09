@@ -477,30 +477,30 @@ impl ConstEvalArithmetic<f64, f64> for BinaryOperator {
 fn consteval_arithmetic_check(expr: &Expression) -> Result<(), ParserError> {
     match expr {
         Expression::Nil => Err(ParserError::Unexpected {
-            unexpected: format!("nil value"),
+            unexpected: "nil value".to_string(),
             expected: None,
         }),
         Expression::True | Expression::False => Err(ParserError::Unexpected {
-            unexpected: format!("boolean value"),
+            unexpected: "boolean value".to_string(),
             expected: None,
         }),
         // Convertion from **String** to **Numeric** is insane.
         //
         // NOTE Incompatible with Lua 5.3
         Expression::String(_) => Err(ParserError::Unexpected {
-            unexpected: format!("string value"),
+            unexpected: "string value".to_string(),
             expected: None,
         }),
         Expression::Dots => Err(ParserError::Unexpected {
-            unexpected: format!("'...'"),
+            unexpected: "'...'".to_string(),
             expected: None,
         }),
         Expression::Function(_) => Err(ParserError::Unexpected {
-            unexpected: format!("function value"),
+            unexpected: "function value".to_string(),
             expected: None,
         }),
         Expression::TableConstructor(_) => Err(ParserError::Unexpected {
-            unexpected: format!("table value"),
+            unexpected: "table value".to_string(),
             expected: None,
         }),
         _ => Ok(()),
@@ -511,11 +511,11 @@ fn consteval_arithmetic_check(expr: &Expression) -> Result<(), ParserError> {
 fn consteval_bitwise_operation_check(expr: &Expression) -> Result<(), ParserError> {
     match expr {
         Expression::Nil => Err(ParserError::Unexpected {
-            unexpected: format!("nil value"),
+            unexpected: "nil value".to_string(),
             expected: None,
         }),
         Expression::True | Expression::False => Err(ParserError::Unexpected {
-            unexpected: format!("boolean value"),
+            unexpected: "boolean value".to_string(),
             expected: None,
         }),
         // ```lua
@@ -526,23 +526,23 @@ fn consteval_bitwise_operation_check(expr: &Expression) -> Result<(), ParserErro
         //
         // NOTE Incompatible with Lua 5.3
         Expression::Number(_) => Err(ParserError::Unexpected {
-            unexpected: format!("float value"),
+            unexpected: "float value".to_string(),
             expected: None,
         }),
         Expression::String(_) => Err(ParserError::Unexpected {
-            unexpected: format!("string value"),
+            unexpected: "string value".to_string(),
             expected: None,
         }),
         Expression::Dots => Err(ParserError::Unexpected {
-            unexpected: format!("'...'"),
+            unexpected: "'...'".to_string(),
             expected: None,
         }),
         Expression::Function(_) => Err(ParserError::Unexpected {
-            unexpected: format!("function value"),
+            unexpected: "function value".to_string(),
             expected: None,
         }),
         Expression::TableConstructor(_) => Err(ParserError::Unexpected {
-            unexpected: format!("table value"),
+            unexpected: "table value".to_string(),
             expected: None,
         }),
         _ => Ok(()),
@@ -562,7 +562,7 @@ fn consteval_logical_operation_check(expr: &Expression) -> Result<(), ParserErro
         //
         // NOTE Incompatible with Lua 5.3
         Expression::Dots => Err(ParserError::Unexpected {
-            unexpected: format!("'...'"),
+            unexpected: "'...'".to_string(),
             expected: None,
         }),
         _ => Ok(()),
@@ -573,11 +573,11 @@ fn consteval_logical_operation_check(expr: &Expression) -> Result<(), ParserErro
 fn consteval_string_operation_check(expr: &Expression) -> Result<(), ParserError> {
     match expr {
         Expression::Nil => Err(ParserError::Unexpected {
-            unexpected: format!("nil value"),
+            unexpected: "nil value".to_string(),
             expected: None,
         }),
         Expression::True | Expression::False => Err(ParserError::Unexpected {
-            unexpected: format!("boolean value"),
+            unexpected: "boolean value".to_string(),
             expected: None,
         }),
         // ```lua
@@ -588,23 +588,23 @@ fn consteval_string_operation_check(expr: &Expression) -> Result<(), ParserError
         //
         // NOTE Incompatible with Lua 5.3
         Expression::Integer(_) | Expression::Number(_) => Err(ParserError::Unexpected {
-            unexpected: format!("number value"),
+            unexpected: "number value".to_string(),
             expected: None,
         }),
         Expression::Dots => Err(ParserError::Unexpected {
-            unexpected: format!("'...'"),
+            unexpected: "'...'".to_string(),
             expected: None,
         }),
         Expression::Function(_) => Err(ParserError::Unexpected {
-            unexpected: format!("function value"),
+            unexpected: "function value".to_string(),
             expected: None,
         }),
         Expression::TableConstructor(_) => Err(ParserError::Unexpected {
-            unexpected: format!("table value"),
+            unexpected: "table value".to_string(),
             expected: None,
         }),
         Expression::UnaryOperator(_, _) => Err(ParserError::Unexpected {
-            unexpected: format!("prefixed with an unary operator expression"),
+            unexpected: "prefixed with an unary operator expression".to_string(),
             expected: None,
         }),
         _ => Ok(()),
@@ -622,7 +622,7 @@ mod tests {
         };
     }
 
-    const NopFunction: Expression = Expression::Function(FunctionDefinition {
+    const NOP_FUNCTION: Expression = Expression::Function(FunctionDefinition {
         parameters: Vec::new(),
         has_varargs: false,
         body: Block {
@@ -631,7 +631,7 @@ mod tests {
         },
     });
 
-    const NopTable: Expression =
+    const NOP_TABLE: Expression =
         Expression::TableConstructor(TableConstructor { fields: Vec::new() });
 
     #[test]
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(
             consteval_expression(Expression::UnaryOperator(
                 UnaryOperator::Not,
-                Box::new(NopFunction)
+                Box::new(NOP_FUNCTION)
             ))
             .unwrap(),
             Expression::False
@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(
             consteval_expression(Expression::UnaryOperator(
                 UnaryOperator::Not,
-                Box::new(NopTable)
+                Box::new(NOP_TABLE)
             ))
             .unwrap(),
             Expression::False
@@ -1021,7 +1021,7 @@ mod tests {
         assert_eq!(
             consteval_expression(Expression::BinaryOperator(
                 BinaryOperator::And,
-                Box::new(NopTable),
+                Box::new(NOP_TABLE),
                 Box::new(id!("a"))
             ))
             .unwrap(),
@@ -1042,10 +1042,10 @@ mod tests {
             consteval_expression(Expression::BinaryOperator(
                 BinaryOperator::Or,
                 Box::new(Expression::False),
-                Box::new(NopTable)
+                Box::new(NOP_TABLE)
             ))
             .unwrap(),
-            NopTable
+            NOP_TABLE
         );
     }
 
@@ -1055,8 +1055,8 @@ mod tests {
         assert_eq!(
             consteval_expression(Expression::BinaryOperator(
                 BinaryOperator::Equal,
-                Box::new(NopTable),
-                Box::new(NopTable)
+                Box::new(NOP_TABLE),
+                Box::new(NOP_TABLE)
             ))
             .unwrap(),
             Expression::False
@@ -1064,8 +1064,8 @@ mod tests {
         assert_eq!(
             consteval_expression(Expression::BinaryOperator(
                 BinaryOperator::NotEqual,
-                Box::new(NopTable),
-                Box::new(NopFunction)
+                Box::new(NOP_TABLE),
+                Box::new(NOP_FUNCTION)
             ))
             .unwrap(),
             Expression::True
@@ -1405,14 +1405,14 @@ mod tests {
         // - function() end
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::Minus,
-            Box::new(NopFunction)
+            Box::new(NOP_FUNCTION)
         ))
         .is_err());
 
         // -{}
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::Minus,
-            Box::new(NopTable)
+            Box::new(NOP_TABLE)
         ))
         .is_err());
     }
@@ -1464,14 +1464,14 @@ mod tests {
         // ~ function() end
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::BitNot,
-            Box::new(NopFunction)
+            Box::new(NOP_FUNCTION)
         ))
         .is_err());
 
         // ~ {}
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::BitNot,
-            Box::new(NopTable)
+            Box::new(NOP_TABLE)
         ))
         .is_err());
     }
@@ -1525,14 +1525,14 @@ mod tests {
         // # function() end
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::Len,
-            Box::new(NopFunction)
+            Box::new(NOP_FUNCTION)
         ))
         .is_err());
 
         // # {}
         assert!(consteval_expression(Expression::UnaryOperator(
             UnaryOperator::Len,
-            Box::new(NopTable)
+            Box::new(NOP_TABLE)
         ))
         .is_err());
 
