@@ -48,6 +48,12 @@ pub enum Expression {
     BinaryOperator(BinaryOperator, Box<Expression>, Box<Expression>),
 }
 
+impl Default for Expression {
+    fn default() -> Expression {
+        Expression::Nil
+    }
+}
+
 /// `SuffixedExpression` is a specical case of `Expression`.
 ///
 /// It can be the following:
