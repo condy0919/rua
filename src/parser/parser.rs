@@ -28,6 +28,7 @@ pub enum ParserError {
     ExpressionNotStatement,
     RecursionLimit,
     LexerError(LexerError),
+    DividedByZero,
 }
 
 impl fmt::Display for ParserError {
@@ -56,6 +57,7 @@ impl fmt::Display for ParserError {
             ParserError::ExpressionNotStatement => write!(f, "expression is not a statement"),
             ParserError::RecursionLimit => write!(f, "recursion limit reached"),
             ParserError::LexerError(e) => write!(f, "{}", e),
+            ParserError::DividedByZero => write!(f, "divided by zero"),
         }
     }
 }
@@ -181,4 +183,30 @@ impl<'a, S: io::Read> Parser<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expect_string() {
+        let mut s: &[u8] = b"'string'";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(parser.expect_string().unwrap(), "string".to_owned());
+    }
+
+    #[test]
+    fn expect_identifier() {
+        let mut s: &[u8] = b"foo";
+        let mut parser = Parser::new(&mut s);
+        assert_eq!(parser.expect_identifier().unwrap(), "foo".to_owned());
+    }
+
+    #[test]
+    fn exceed_recursion_limit() {
+        let mut s: &[u8] = b"foo";
+        let mut parser = Parser::new(&mut s);
+
+        // 500 is enough larger than MAX_RECURSION
+        let guards = (0..500)
+            .map(|_| parser.get_recursion_guard())
+            .collect::<Vec<_>>();
+        assert_eq!(guards.last(), Some(&Err(ParserError::RecursionLimit)));
+    }
 }

@@ -157,7 +157,7 @@ pub trait Precedence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexer::{Lexer, LexerError};
+    use crate::lexer::Lexer;
 
     #[test]
     fn binary_operator_precedence() {
