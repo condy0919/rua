@@ -1,5 +1,6 @@
 use std::char;
 
+#[allow(clippy::module_inception)]
 pub mod lexer;
 pub use self::lexer::*;
 

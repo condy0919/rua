@@ -106,10 +106,9 @@ impl<'a, S: io::Read> Lexer<'a, S> {
 mod tests {
     use super::*;
 
-    const EPS: f64 = 1e-5;
     fn float_equal(t: Token, f: f64) -> bool {
         match t {
-            Token::Number(n) => (n - f).abs() < EPS,
+            Token::Number(n) => (n - f).abs() < f64::EPSILON,
             _ => false,
         }
     }

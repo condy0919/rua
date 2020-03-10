@@ -10,6 +10,7 @@ pub use self::expression::*;
 pub mod statement;
 pub use self::statement::*;
 
+#[allow(clippy::module_inception)]
 pub mod parser;
 pub use self::parser::*;
 
